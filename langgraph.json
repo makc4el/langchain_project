@@ -4,12 +4,12 @@
   ],
   "graphs": {
     "agent": {
-      "path": "main.py:create_deployable_agent",
-      "description": "A conversational AI agent powered by GPT-4 Turbo"
+      "path": "main.py:graph",
+      "description": "A conversational AI agent powered by OpenAI GPT-4o-mini with API support"
     },
     "advanced_agent": {
-      "path": "main.py:create_advanced_agent_graph", 
-      "description": "An advanced conversational AI agent with session management"
+      "path": "main.py:advanced_graph", 
+      "description": "An advanced conversational AI agent with session management and user context"
     }
   },
   "env": [
@@ -20,15 +20,14 @@
     "langchain>=0.3.27",
     "langchain-openai>=0.3.32", 
     "langgraph>=0.6.7",
-    "langgraph-prebuilt>=0.6.4",
     "python-dotenv>=1.1.1"
   ],
   "dockerfile_lines": [],
   "metadata": {
     "name": "langchain-project",
     "version": "0.1.0",
-    "description": "A LangGraph-based conversational AI agent using OpenAI GPT-4 Turbo",
+    "description": "LangGraph Platform-compatible conversational AI agent using OpenAI GPT-4o-mini with full API support",
     "author": "Max Odarchenko",
-    "tags": ["langchain", "langgraph", "openai", "conversational-ai", "gpt-4"]
+    "tags": ["langchain", "langgraph", "openai", "conversational-ai", "gpt-4o-mini", "platform-ready", "api"]
   }
 }
