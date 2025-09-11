@@ -1,115 +1,194 @@
+"""
+LangGraph Platform-Ready Chat Agent
+
+A production-ready conversational AI agent built with LangGraph and OpenAI GPT-4o-mini.
+Designed for seamless deployment on LangGraph Platform with API support.
+"""
+
 import os
-from typing import TypedDict, Annotated
-from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage
+from typing import Dict, List, Any
+from dotenv import load_dotenv
+
+# Load environment variables (for local development)
+load_dotenv()
+
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_openai import ChatOpenAI
+from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add_messages
+from typing_extensions import Annotated, TypedDict
 
-# Define the state structure
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
 
-# Initialize the GPT model for LangGraph Platform
-def create_llm():
+class ChatState(TypedDict):
+    """State for the chat agent."""
+    messages: Annotated[List[BaseMessage], add_messages]
+
+
+def create_llm() -> ChatOpenAI:
+    """Create and configure the OpenAI LLM instance."""
     return ChatOpenAI(
-        model="gpt-4o-mini",  # Use GPT-4o-mini for better platform compatibility
+        model="gpt-4o-mini",
         temperature=0.7,
-        # OpenAI API key will be provided by platform environment
+        openai_api_key=os.getenv("OPENAI_API_KEY"),
     )
 
-# Define the agent node for platform deployment
-def agent_node(state: State, config: RunnableConfig):
-    """Main agent node that processes messages using OpenAI GPT-4o-mini"""
-    llm = create_llm()
-    
-    # Get messages from state
-    messages = state["messages"]
-    
-    # Generate response using the LLM
-    response = llm.invoke(messages, config)
-    
-    # Return the updated state with the new message
-    return {"messages": [response]}
 
-# Create the main graph for platform deployment
-def create_graph():
-    """Create and return the compiled graph for LangGraph Platform"""
-    # Initialize the state graph
-    workflow = StateGraph(State)
+def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
+    """
+    Main chat node that processes user input and generates AI responses.
     
-    # Add the agent node
-    workflow.add_node("agent", agent_node)
+    Args:
+        state: Current chat state containing message history
+        config: Runtime configuration from LangGraph platform
+        
+    Returns:
+        Dictionary containing the AI response message
+    """
+    try:
+        llm = create_llm()
+        response = llm.invoke(state["messages"])
+        return {"messages": [response]}
+    except Exception as e:
+        # Handle errors gracefully
+        error_message = AIMessage(
+            content=f"I apologize, but I encountered an error: {str(e)}. Please try again."
+        )
+        return {"messages": [error_message]}
+
+
+def create_simple_graph() -> StateGraph:
+    """
+    Create a simple chat agent graph for basic conversation.
     
-    # Define the flow
-    workflow.add_edge(START, "agent")
-    workflow.add_edge("agent", END)
+    Returns:
+        Compiled StateGraph ready for deployment
+    """
+    # Create the graph
+    workflow = StateGraph(ChatState)
     
-    # Compile the graph with checkpointer for platform
+    # Add the chat node
+    workflow.add_node("chat", chat_node)
+    
+    # Set entry point
+    workflow.set_entry_point("chat")
+    
+    # Chat node leads to end
+    workflow.add_edge("chat", END)
+    
+    # Compile and return
     return workflow.compile()
 
-# Platform-compatible graph creation (main export)
-graph = create_graph()
 
-# Alternative export name for compatibility
-def create_deployable_agent():
+class AdvancedChatState(ChatState):
+    """Enhanced state for advanced chat agent with session management."""
+    user_id: str = ""
+    session_id: str = ""
+    conversation_count: int = 0
+
+
+def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict[str, Any]:
     """
-    This function returns the compiled graph for deployment on LangGraph Platform
+    Advanced chat node with session management and enhanced context.
+    
+    Args:
+        state: Enhanced chat state with user and session information
+        config: Runtime configuration from LangGraph platform
+        
+    Returns:
+        Dictionary containing the AI response and updated state
     """
-    return create_graph()
+    try:
+        llm = create_llm()
+        
+        # Add conversation context if this is a continuing conversation
+        messages = state["messages"]
+        conversation_count = state.get("conversation_count", 0)
+        
+        if conversation_count == 0:
+            # First message in session
+            system_context = AIMessage(
+                content="Hello! I'm your AI assistant. How can I help you today?"
+            )
+            messages = [system_context] + messages
+        
+        response = llm.invoke(messages)
+        
+        return {
+            "messages": [response],
+            "conversation_count": conversation_count + 1
+        }
+        
+    except Exception as e:
+        # Handle errors gracefully with session context
+        user_id = state.get("user_id", "unknown")
+        error_message = AIMessage(
+            content=f"I apologize, but I encountered an error: {str(e)}. Please try again."
+        )
+        return {
+            "messages": [error_message],
+            "conversation_count": state.get("conversation_count", 0)
+        }
 
-# Main function for local testing only
-def run_agent(prompt: str):
-    """Local testing function - not used in platform deployment"""
-    agent = create_graph()
-    
-    initial_state = {
-        "messages": [HumanMessage(content=prompt)]
-    }
-    
-    result = agent.invoke(initial_state)
-    last_message = result["messages"][-1]
-    return last_message.content
 
-# Optional: Advanced graph with session management
-class AdvancedState(TypedDict):
-    messages: Annotated[list, add_messages]
-    user_id: str
-    session_id: str
-
-def advanced_agent_node(state: AdvancedState, config: RunnableConfig):
-    """Advanced agent node with session management"""
-    llm = create_llm()
+def create_advanced_graph() -> StateGraph:
+    """
+    Create an advanced chat agent graph with session management.
     
-    # You can add custom logic here based on user_id, session_id, etc.
-    messages = state["messages"]
+    Returns:
+        Compiled StateGraph with enhanced features
+    """
+    # Create the graph with advanced state
+    workflow = StateGraph(AdvancedChatState)
     
-    # Add system message for context if needed
-    system_message = HumanMessage(content="You are a helpful AI assistant. Provide clear and concise responses.")
-    enhanced_messages = [system_message] + messages
+    # Add the advanced chat node
+    workflow.add_node("advanced_chat", advanced_chat_node)
     
-    response = llm.invoke(enhanced_messages, config)
+    # Set entry point
+    workflow.set_entry_point("advanced_chat")
     
-    return {"messages": [response]}
-
-def create_advanced_graph():
-    """Create advanced graph with session management for platform deployment"""
-    workflow = StateGraph(AdvancedState)
-    workflow.add_node("agent", advanced_agent_node)
-    workflow.add_edge(START, "agent")
-    workflow.add_edge("agent", END)
+    # Chat node leads to end
+    workflow.add_edge("advanced_chat", END)
+    
+    # Compile and return
     return workflow.compile()
 
-# Export advanced graph
+
+# Export graphs for LangGraph Platform deployment
+# These variables will be automatically discovered by the platform
+graph = create_simple_graph()
 advanced_graph = create_advanced_graph()
 
-# Local testing (only runs when script is executed directly)
+
+def main():
+    """
+    Local testing function - not used in platform deployment.
+    Run this file directly to test the agent locally.
+    """
+    print("Testing Simple Chat Agent...")
+    
+    # Test the simple graph
+    test_state = {
+        "messages": [HumanMessage(content="Hello! Can you explain what you do?")]
+    }
+    
+    result = graph.invoke(test_state)
+    print("Agent Response:", result["messages"][-1].content)
+    
+    print("\nTesting Advanced Chat Agent...")
+    
+    # Test the advanced graph
+    advanced_test_state = {
+        "messages": [HumanMessage(content="Hello! What's the weather like?")],
+        "user_id": "test_user",
+        "session_id": "test_session",
+        "conversation_count": 0
+    }
+    
+    advanced_result = advanced_graph.invoke(advanced_test_state)
+    print("Advanced Agent Response:", advanced_result["messages"][-1].content)
+    print("Conversation Count:", advanced_result["conversation_count"])
+
+
 if __name__ == "__main__":
-    # Test the agent locally
-    test_prompt = "What is LangGraph?"
-    print(f"Testing locally with: {test_prompt}")
-    try:
-        result = run_agent(test_prompt)
-        print(f"Response: {result}")
-    except Exception as e:
-        print(f"Local test failed (this is normal without API key): {e}")
+    main()

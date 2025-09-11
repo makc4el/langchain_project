@@ -1,0 +1,84 @@
+# Cursor Rules for LangChain Project
+
+## Project Overview
+This is a Python project using LangChain for building AI agents and applications. The project uses modern Python tooling and follows best practices for LangChain development. This project is designed to be hosted on the LangGraph platform and function as an API service accessible through the platform.
+
+## Technology Stack
+- **Language**: Python 3.8+
+- **AI Framework**: LangChain
+- **LLM Provider**: OpenAI (GPT models)
+- **Package Manager**: uv (modern Python package manager)
+- **Environment Management**: python-dotenv for environment variables
+- **Configuration**: pyproject.toml for project metadata and dependencies
+- **Deployment**: LangGraph Platform (for API hosting and scaling)
+
+## Project Structure
+- `main.py` - Main application entry point
+- `pyproject.toml` - Project configuration and dependencies
+- `uv.lock` - Dependency lock file
+- `.env` - Environment variables (not tracked in git)
+- `README.md` - Project documentation
+- `langgraph.json` - LangGraph platform configuration
+
+## Deployment and Hosting
+This project is designed to be deployed on the LangGraph platform as an API service:
+- **Platform**: LangGraph Cloud for scalable AI agent hosting
+- **API Endpoint**: Accessible via LangGraph platform's API gateway
+- **Configuration**: Uses `langgraph.json` for platform-specific settings
+- **Scaling**: Automatic scaling based on API request volume
+- **Environment**: Production environment variables managed through LangGraph platform
+
+## Coding Standards and Preferences
+
+### Python Style
+- Follow PEP 8 style guidelines
+- Use type hints for function parameters and return values
+- Write descriptive docstrings for functions and classes
+- Prefer f-strings for string formatting
+- Use meaningful variable and function names
+
+### LangChain Specific
+- Import LangChain modules specifically (e.g., `from langchain_openai import ChatOpenAI`)
+- Use proper error handling for LLM API calls
+- Implement proper prompt templates when building complex chains
+- Follow LangChain's recommended patterns for agents and tools
+- Use environment variables for API keys and sensitive configuration
+
+### Dependencies
+- Use `uv add <package>` to add new dependencies
+- Keep dependencies minimal and well-documented
+- Pin versions for production deployments
+- Use virtual environments for isolation
+
+### Environment Variables
+- Store API keys and secrets in `.env` file
+- Use descriptive variable names (e.g., `OPENAI_API_KEY`)
+- Load environment variables using `python-dotenv`
+- Never commit API keys or secrets to version control
+
+## Common Patterns
+When working with this project:
+
+1. **LLM Initialization**: Always configure temperature and model parameters explicitly
+2. **Error Handling**: Wrap LLM calls in try-catch blocks for production code
+3. **Tool Creation**: Follow the function signature pattern with proper docstrings for agent tools
+4. **Testing**: Create test cases for custom tools and chains
+5. **Logging**: Add appropriate logging for debugging and monitoring
+
+## AI Assistant Guidelines
+- Prefer modern LangChain patterns and imports
+- Suggest best practices for prompt engineering
+- Recommend appropriate error handling
+- Consider rate limiting and API costs
+- Focus on maintainable and testable code
+- Suggest relevant LangChain documentation when applicable
+- Design code for deployment on LangGraph platform as API services
+- Follow LangGraph platform best practices for agent hosting
+- Consider API response formats and error handling for web endpoints
+
+## File Patterns to Ignore
+- `__pycache__/` directories
+- `.env` files (contain secrets)
+- `*.pyc` files
+- `.DS_Store` files
+- IDE-specific files not in `.gitignore`
