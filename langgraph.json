@@ -5,20 +5,22 @@
   "graphs": {
     "agent": {
       "path": "main:graph",
-      "description": "A conversational AI agent powered by OpenAI GPT-4o-mini with API support"
+      "description": "A conversational AI agent powered by OpenAI GPT-4o-mini with internet search capabilities via Tavily"
     },
     "advanced_agent": {
       "path": "main:advanced_graph", 
-      "description": "An advanced conversational AI agent with session management and user context"
+      "description": "An advanced conversational AI agent with session management, user context, and internet search capabilities"
     }
   },
   "env": [
-    "OPENAI_API_KEY"
+    "OPENAI_API_KEY",
+    "TAVILY_API_KEY"
   ],
   "python_version": "3.11",
   "pip": [
     "langchain>=0.3.27",
     "langchain-openai>=0.3.32", 
+    "langchain-tavily>=0.2.11",
     "langgraph>=0.6.7",
     "python-dotenv>=1.1.1"
   ],
@@ -28,6 +30,6 @@
     "version": "0.1.0",
     "description": "LangGraph Platform-compatible conversational AI agent using OpenAI GPT-4o-mini with full API support",
     "author": "Max Odarchenko",
-    "tags": ["langchain", "langgraph", "openai", "conversational-ai", "gpt-4o-mini", "platform-ready", "api"]
+    "tags": ["langchain", "langgraph", "openai", "conversational-ai", "gpt-4o-mini", "platform-ready", "api", "tavily", "internet-search", "research"]
   }
 }
