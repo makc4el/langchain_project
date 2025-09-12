@@ -4,12 +4,12 @@
   ],
   "graphs": {
     "agent": {
-      "path": "main_platform_fixed:graph",
-      "description": "A platform-ready conversational AI agent with guaranteed Salesforce tools, internet search, and robust error handling"
+      "path": "main_recursion_fixed:graph",
+      "description": "A recursion-safe conversational AI agent with Salesforce integration, tool call limits, and robust error handling to prevent infinite loops"
     },
     "advanced_agent": {
-      "path": "main_platform_fixed:advanced_graph", 
-      "description": "An advanced conversational AI agent with guaranteed Salesforce capabilities, session management, and resilient platform deployment"
+      "path": "main_recursion_fixed:advanced_graph", 
+      "description": "An advanced recursion-safe conversational AI agent with Salesforce capabilities, session management, and intelligent tool call management"
     }
   },
   "env": [

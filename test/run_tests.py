@@ -62,12 +62,17 @@ def main():
         if run_command("uv run python test_deployment.py", "Platform Deployment Test"):
             tests_passed += 1
     
-    # Test 3: Demo Script (non-interactive check)
+    # Test 3: Recursion Fix Test
+    tests_total += 1
+    if run_command("uv run python test_recursion_fix.py", "Recursion Fix Comprehensive Test"):
+        tests_passed += 1
+    
+    # Test 4: Demo Script (non-interactive check)
     tests_total += 1 
     if run_command("uv run python -c 'import demo_salesforce_agent; print(\"✅ Demo script imports successfully\")'", "Demo Script Import Test"):
         tests_passed += 1
     
-    # Test 4: Shell scripts (if they exist and are executable)
+    # Test 5: Shell scripts (if they exist and are executable)
     shell_scripts = ["test_deployment.sh", "test_endpoints.sh", "chat_with_deployment.sh"]
     for script in shell_scripts:
         script_path = Path(script)
