@@ -4,12 +4,12 @@
   ],
   "graphs": {
     "agent": {
-      "path": "main_platform_ready:graph",
-      "description": "A platform-ready conversational AI agent with Salesforce MCP integration, internet search, and automatic fallback mechanisms"
+      "path": "main_platform_fixed:graph",
+      "description": "A platform-ready conversational AI agent with guaranteed Salesforce tools, internet search, and robust error handling"
     },
     "advanced_agent": {
-      "path": "main_platform_ready:advanced_graph", 
-      "description": "An advanced conversational AI agent with Salesforce capabilities, session management, user context, and resilient platform deployment"
+      "path": "main_platform_fixed:advanced_graph", 
+      "description": "An advanced conversational AI agent with guaranteed Salesforce capabilities, session management, and resilient platform deployment"
     }
   },
   "env": [

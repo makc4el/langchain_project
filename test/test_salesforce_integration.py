@@ -7,7 +7,11 @@ This script tests the Salesforce MCP server integration with the provided creden
 import os
 import sys
 import asyncio
+from pathlib import Path
 from dotenv import load_dotenv
+
+# Add parent directory to path to import from project root
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Load environment variables from .env file
 load_dotenv()
@@ -90,7 +94,7 @@ async def test_agent_integration():
     print("=" * 50)
     
     try:
-        # Import the main module
+        # Import the main module  
         from main import initialize_salesforce_tools, create_simple_graph
         from langchain_core.messages import HumanMessage
         

@@ -5,8 +5,13 @@ This script demonstrates real conversations with the Salesforce-enabled agent.
 """
 
 import asyncio
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
+
+# Add parent directory to path to import from project root
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Load environment variables
 load_dotenv()
