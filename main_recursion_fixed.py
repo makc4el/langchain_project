@@ -240,12 +240,96 @@ def create_guaranteed_salesforce_tools():
         func=guaranteed_object_describe
     ))
     
+    def salesforce_create_record(object_type: str, fields_data: str) -> str:
+        """Create new Salesforce records (Lead, Account, Contact, etc.) with definitive responses."""
+        try:
+            from simple_salesforce import Salesforce
+            import json
+            
+            username = os.getenv("SALESFORCE_USERNAME")
+            password = os.getenv("SALESFORCE_PASSWORD")
+            security_token = os.getenv("SALESFORCE_SECURITY_TOKEN", "")
+            instance_url = os.getenv("SALESFORCE_LOGIN_URL") or os.getenv("SALESFORCE_INSTANCE_URL")
+            
+            if not all([username, password]):
+                return f"❌ **Record Creation - COMPLETE**\n\nError: Salesforce credentials not configured.\n\n**Creation request finished.**"
+            
+            # Parse field data
+            try:
+                if fields_data.startswith('{'):
+                    field_dict = json.loads(fields_data)
+                else:
+                    # Handle simple format: "FirstName=John,LastName=Doe,Company=Test Corp"
+                    field_dict = {}
+                    for item in fields_data.split(','):
+                        if '=' in item:
+                            key, value = item.split('=', 1)
+                            field_dict[key.strip()] = value.strip()
+            except Exception as parse_error:
+                return f"❌ **Record Creation - COMPLETE**\n\n" \
+                       f"🏷️ **Object**: {object_type}\n" \
+                       f"❌ **Error**: Invalid field data format. Use 'FirstName=John,LastName=Doe' or JSON format.\n" \
+                       f"**Parsing Error**: {str(parse_error)}\n\n**Creation request finished.**"
+            
+            if not field_dict:
+                return f"❌ **Record Creation - COMPLETE**\n\n" \
+                       f"🏷️ **Object**: {object_type}\n" \
+                       f"❌ **Error**: No valid field data provided.\n\n**Creation request finished.**"
+            
+            # Create Salesforce connection
+            sf = Salesforce(
+                username=username,
+                password=password,
+                security_token=security_token,
+                instance_url=instance_url
+            )
+            
+            # Get the Salesforce object
+            sf_object = getattr(sf, object_type, None)
+            if not sf_object:
+                return f"❌ **Record Creation - COMPLETE**\n\n" \
+                       f"🏷️ **Object**: {object_type}\n" \
+                       f"❌ **Error**: Object type '{object_type}' not found.\n" \
+                       f"💡 **Common Objects**: Lead, Account, Contact, Opportunity, Case\n\n" \
+                       f"**Creation request finished.**"
+            
+            # Create the record
+            result = sf_object.create(field_dict)
+            
+            if result.get('success'):
+                return f"✅ **Record Creation - COMPLETE**\n\n" \
+                       f"🏷️ **Object**: {object_type}\n" \
+                       f"🆔 **New Record ID**: {result['id']}\n" \
+                       f"📝 **Fields Created**: {', '.join(field_dict.keys())}\n" \
+                       f"✨ **Status**: Successfully created\n\n" \
+                       f"**Record creation complete and successful.**"
+            else:
+                errors = result.get('errors', ['Unknown error'])
+                return f"❌ **Record Creation - COMPLETE**\n\n" \
+                       f"🏷️ **Object**: {object_type}\n" \
+                       f"❌ **Errors**: {', '.join([str(e) for e in errors])}\n\n" \
+                       f"**Creation request finished with errors.**"
+            
+        except ImportError:
+            return "❌ **Record Creation - COMPLETE**\n\nError: Salesforce integration requires 'simple-salesforce' package.\n\n**Creation request finished.**"
+        except Exception as e:
+            return f"❌ **Record Creation - COMPLETE**\n\n" \
+                   f"🏷️ **Object**: {object_type}\n" \
+                   f"❌ **Error**: {str(e)}\n\n" \
+                   f"**Creation request finished.**"
+    
+    guaranteed_tools.append(Tool(
+        name="salesforce_create_record",
+        description="Create new Salesforce records (Lead, Account, Contact, etc.). Use format: object_type='Lead', fields_data='FirstName=John,LastName=Doe,Company=Test Corp,Email=john@test.com' or JSON format.",
+        func=salesforce_create_record
+    ))
+    
     print(f"✅ Created {len(guaranteed_tools)} guaranteed Salesforce tools")
     return guaranteed_tools
 
 
-def create_guaranteed_tools() -> List[BaseTool]:
-    """Create a list of tools that provide definitive, non-looping responses."""
+async def create_real_mcp_tools() -> List[BaseTool]:
+    """Create tools using the REAL MCP server (same as Claude Desktop)."""
     tools = []
     
     # Always add search tool
@@ -253,9 +337,20 @@ def create_guaranteed_tools() -> List[BaseTool]:
     tools.append(search_tool)
     print(f"✅ Added search tool: {search_tool.name}")
     
-    # Add Salesforce tools if possible
-    salesforce_tools = create_guaranteed_salesforce_tools()
-    tools.extend(salesforce_tools)
+    # Add REAL Salesforce MCP tools (same as Claude Desktop uses)
+    if validate_platform_config():
+        try:
+            print("🔗 Connecting to REAL Salesforce MCP server...")
+            real_salesforce_tools = await create_platform_ready_salesforce_tools()
+            tools.extend(real_salesforce_tools)
+            print(f"✅ Added {len(real_salesforce_tools)} REAL MCP Salesforce tools")
+        except Exception as e:
+            print(f"⚠️ Real MCP tools failed, using fallback: {str(e)}")
+            # Fallback to basic tools only if MCP fails
+            salesforce_tools = create_guaranteed_salesforce_tools()
+            tools.extend(salesforce_tools)
+    else:
+        print("⚠️ Salesforce not configured, skipping MCP tools")
     
     # Add a help tool that's always available with definitive response
     def help_tool() -> str:
@@ -277,7 +372,24 @@ def create_guaranteed_tools() -> List[BaseTool]:
     return tools
 
 
-# Initialize guaranteed tools
+def create_guaranteed_tools() -> List[BaseTool]:
+    """Synchronous wrapper for creating tools."""
+    try:
+        return asyncio.run(create_real_mcp_tools())
+    except Exception as e:
+        print(f"⚠️ Failed to create real MCP tools: {str(e)}")
+        # Ultimate fallback - basic tools only
+        tools = [create_guaranteed_search_tool()]
+        
+        # Add a simple help tool
+        def help_tool() -> str:
+            return "🤖 I can search for information and provide help. Salesforce integration is temporarily unavailable."
+        
+        tools.append(Tool(name="help", description="Get help", func=help_tool))
+        return tools
+
+
+# Initialize tools
 GUARANTEED_TOOLS = create_guaranteed_tools()
 
 
@@ -356,22 +468,26 @@ def should_continue_advanced(state: AdvancedChatState) -> str:
 
 
 def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
-    """Main chat node with recursion prevention."""
+    """Main chat node with recursion prevention and proper error handling."""
     try:
         messages = state["messages"]
         tool_call_count = state.get("tool_call_count", 0)
         
-        # Add welcome message with clear capabilities
+        # Add welcome message with clear capabilities including record creation
         if len(messages) <= 1 or not any("assistant with" in str(msg.content) for msg in messages if hasattr(msg, 'content')):
             tool_names = [tool.name for tool in GUARANTEED_TOOLS]
             salesforce_available = any("salesforce" in name for name in tool_names)
             search_available = any("search" in name for name in tool_names)
+            create_available = any("create" in name for name in tool_names)
             
             capabilities = []
             if search_available:
                 capabilities.append("search for information")
             if salesforce_available:
-                capabilities.append("work with your Salesforce org (execute queries, describe objects, check status)")
+                sf_capabilities = ["execute SOQL queries", "describe objects", "check status"]
+                if create_available:
+                    sf_capabilities.append("create new records (Leads, Accounts, Contacts, etc.)")
+                capabilities.append(f"work with your Salesforce org ({', '.join(sf_capabilities)})")
             capabilities.append("provide help and guidance")
             
             system_message = AIMessage(
@@ -390,11 +506,22 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        error_message = AIMessage(
-            content=f"I encountered an error: {str(e)}. "
-                   f"I can still help with Salesforce operations, searches, or general questions. "
-                   f"Please try rephrasing your request or ask for help to see my capabilities."
-        )
+        # Enhanced error handling to prevent tool call ID mismatches
+        print(f"⚠️ Chat node error: {str(e)}")
+        
+        # Check if this is a tool call related error
+        if "tool_call" in str(e).lower() or "tool_calls" in str(e).lower():
+            error_message = AIMessage(
+                content="I had an issue with a tool call. Let me help you with a fresh start. "
+                       "I can search for information, work with your Salesforce org (including creating new Lead records), "
+                       "or answer questions. What would you like to do?"
+            )
+        else:
+            error_message = AIMessage(
+                content=f"I encountered an error: {str(e)}. "
+                       f"I can still help with Salesforce operations (including creating Lead records), searches, or general questions. "
+                       f"Please try rephrasing your request or ask for help to see my capabilities."
+            )
         return {
             "messages": [error_message],
             "tool_call_count": state.get("tool_call_count", 0)
