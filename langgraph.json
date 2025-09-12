@@ -36,8 +36,8 @@
   "metadata": {
     "name": "langchain-project",
     "version": "0.1.0",
-    "description": "LangGraph Platform-compatible conversational AI agent using OpenAI GPT-4o-mini with full API support",
-    "author": "Max Odarchenko",
-    "tags": ["langchain", "langgraph", "openai", "conversational-ai", "gpt-4o-mini", "platform-ready", "api", "tavily", "internet-search", "research"]
+    "description": "LangGraph Platform-ready conversational AI agent with Salesforce MCP integration, OpenAI GPT-4o-mini, and intelligent fallback mechanisms",
+    "author": "Max Odarchenko", 
+    "tags": ["langchain", "langgraph", "openai", "salesforce", "mcp", "conversational-ai", "gpt-4o-mini", "platform-ready", "api", "tavily", "internet-search", "crm", "fallback"]
   }
 }
