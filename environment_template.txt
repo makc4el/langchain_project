@@ -1,0 +1,32 @@
+# LangChain Project Environment Variables Template
+# Copy these variables to your .env file and fill in your actual values
+
+# OpenAI Configuration
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Tavily Search Configuration (optional)
+TAVILY_API_KEY=your_tavily_api_key_here
+
+# Salesforce MCP Configuration
+# Choose one of the following authentication methods:
+
+# Method 1: Username/Password Authentication
+SALESFORCE_CONNECTION_TYPE=User_Password
+SALESFORCE_USERNAME=your_salesforce_username@company.com
+SALESFORCE_PASSWORD=your_salesforce_password
+SALESFORCE_SECURITY_TOKEN=your_security_token_from_salesforce
+SALESFORCE_INSTANCE_URL=https://login.salesforce.com
+
+# Method 2: OAuth 2.0 Client Credentials (comment out Method 1 if using this)
+# SALESFORCE_CONNECTION_TYPE=OAuth_2.0_Client_Credentials
+# SALESFORCE_CLIENT_ID=your_connected_app_client_id
+# SALESFORCE_CLIENT_SECRET=your_connected_app_client_secret
+# SALESFORCE_INSTANCE_URL=https://your-domain.my.salesforce.com
+
+# Method 3: Salesforce CLI Authentication (comment out Methods 1&2 if using this)
+# SALESFORCE_CONNECTION_TYPE=Salesforce_CLI
+# Note: Requires Salesforce CLI to be installed and authenticated
+
+# LangGraph Platform Configuration (if deploying)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_api_key_here

@@ -6,6 +6,7 @@ Designed for seamless deployment on LangGraph Platform with API support.
 """
 
 import os
+import asyncio
 from typing import Dict, List, Any
 from dotenv import load_dotenv
 
@@ -14,12 +15,16 @@ load_dotenv()
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from langchain_tavily import TavilySearch
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from typing_extensions import Annotated, TypedDict
+
+# Import Salesforce MCP integration
+from salesforce_mcp_wrapper import SalesforceMCPWrapper, validate_salesforce_config
 
 class ChatState(TypedDict):
     """State for the chat agent."""
@@ -53,6 +58,67 @@ def get_search_tool():
 
 search_tool = get_search_tool()
 
+# Global variable to store Salesforce wrapper
+salesforce_wrapper: SalesforceMCPWrapper = None
+
+
+def get_salesforce_tools() -> List[BaseTool]:
+    """Get Salesforce tools with proper error handling."""
+    global salesforce_wrapper
+    
+    # Check if Salesforce is configured
+    if not validate_salesforce_config():
+        print("⚠️  Salesforce not configured. Skipping Salesforce tools.")
+        return []
+    
+    try:
+        # Initialize Salesforce wrapper if not already done
+        if salesforce_wrapper is None:
+            salesforce_wrapper = SalesforceMCPWrapper()
+            
+        # Try to initialize the wrapper (this is async, but we'll handle it)
+        # For now, return empty list and initialize tools later
+        return []
+        
+    except Exception as e:
+        print(f"⚠️  Salesforce tools unavailable: {str(e)}")
+        return []
+
+
+async def initialize_salesforce_tools() -> List[BaseTool]:
+    """Async function to properly initialize Salesforce tools."""
+    global salesforce_wrapper
+    
+    try:
+        if salesforce_wrapper is None:
+            salesforce_wrapper = SalesforceMCPWrapper()
+            
+        if await salesforce_wrapper.initialize():
+            print("✅ Salesforce tools initialized successfully")
+            return salesforce_wrapper.get_tools()
+        else:
+            print("❌ Failed to initialize Salesforce tools")
+            return []
+            
+    except Exception as e:
+        print(f"❌ Error initializing Salesforce tools: {str(e)}")
+        return []
+
+
+def get_all_tools() -> List[BaseTool]:
+    """Get all available tools (search + salesforce)."""
+    tools = [search_tool]
+    
+    # Add Salesforce tools if available
+    salesforce_tools = get_salesforce_tools()
+    tools.extend(salesforce_tools)
+    
+    return tools
+
+
+# Initialize all available tools
+all_tools = get_all_tools()
+
 
 def create_llm(bind_tools: bool = False) -> ChatOpenAI:
     """Create and configure the OpenAI LLM instance."""
@@ -63,8 +129,8 @@ def create_llm(bind_tools: bool = False) -> ChatOpenAI:
     )
     
     if bind_tools:
-        # Bind the search tool to the LLM
-        llm = llm.bind_tools([search_tool])
+        # Bind all available tools to the LLM
+        llm = llm.bind_tools(all_tools)
     
     return llm
 
@@ -101,11 +167,20 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
         Dictionary containing the AI response message
     """
     try:
-        # Add system message to explain search capabilities
+        # Add system message to explain capabilities
         messages = state["messages"]
-        if not any(msg.content and "I can search the internet" in str(msg.content) for msg in messages):
+        capabilities_mentioned = any(msg.content and ("I can search the internet" in str(msg.content) or "I can help you with Salesforce" in str(msg.content)) for msg in messages)
+        
+        if not capabilities_mentioned:
+            # Check what tools are available
+            has_salesforce = len([t for t in all_tools if 'salesforce' in t.name.lower()]) > 0
+            
+            capabilities = ["I can search the internet for current information"]
+            if has_salesforce:
+                capabilities.append("I can help you with Salesforce data, queries, and operations")
+            
             system_message = AIMessage(
-                content="I can search the internet for current information when needed. Just ask me about recent events, news, or current data!"
+                content=f"{' and '.join(capabilities)}. How can I assist you today?"
             )
             messages = [system_message] + messages
         
@@ -132,7 +207,7 @@ def create_simple_graph() -> StateGraph:
     
     # Add nodes
     workflow.add_node("chat", chat_node)
-    workflow.add_node("tools", ToolNode([search_tool]))
+    workflow.add_node("tools", ToolNode(all_tools))
     
     # Set entry point
     workflow.set_entry_point("chat")
@@ -237,7 +312,7 @@ def create_advanced_graph() -> StateGraph:
     
     # Add nodes
     workflow.add_node("advanced_chat", advanced_chat_node)
-    workflow.add_node("tools", ToolNode([search_tool]))
+    workflow.add_node("tools", ToolNode(all_tools))
     
     # Set entry point
     workflow.set_entry_point("advanced_chat")
