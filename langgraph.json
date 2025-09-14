@@ -4,11 +4,11 @@
   ],
   "graphs": {
     "agent": {
-      "path": "main_recursion_fixed:graph",
+      "path": "main_final_working:graph",
       "description": "A recursion-safe conversational AI agent with Salesforce integration, tool call limits, and robust error handling to prevent infinite loops"
     },
     "advanced_agent": {
-      "path": "main_recursion_fixed:advanced_graph", 
+      "path": "main_final_working:advanced_graph", 
       "description": "An advanced recursion-safe conversational AI agent with Salesforce capabilities, session management, and intelligent tool call management"
     }
   },

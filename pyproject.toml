@@ -22,8 +22,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 # Test files are now organized in the test/ directory
-# Only main.py module will be packaged for deployment
-py-modules = ["main"]
+# Main application module for LangGraph Platform deployment  
+py-modules = ["main_final_working"]
 
 [project.optional-dependencies]
 dev = [

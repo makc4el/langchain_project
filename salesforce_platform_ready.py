@@ -49,11 +49,14 @@ class PlatformSalesforceMCPWrapper:
         """Load configuration from environment variables."""
         instance_url = os.getenv("SALESFORCE_INSTANCE_URL") or os.getenv("SALESFORCE_LOGIN_URL", "https://login.salesforce.com")
         
+        # Also try SALESFORCE_TOKEN (Claude Desktop format)
+        security_token = os.getenv("SALESFORCE_SECURITY_TOKEN") or os.getenv("SALESFORCE_TOKEN", "")
+        
         return PlatformSalesforceConfig(
             connection_type=os.getenv("SALESFORCE_CONNECTION_TYPE", "User_Password"),
             username=os.getenv("SALESFORCE_USERNAME"),
             password=os.getenv("SALESFORCE_PASSWORD"),
-            security_token=os.getenv("SALESFORCE_SECURITY_TOKEN", ""),
+            security_token=security_token,
             instance_url=instance_url,
             client_id=os.getenv("SALESFORCE_CLIENT_ID"),
             client_secret=os.getenv("SALESFORCE_CLIENT_SECRET"),
@@ -106,6 +109,7 @@ class PlatformSalesforceMCPWrapper:
                 env["SALESFORCE_PASSWORD"] = self.config.password
             if self.config.security_token:
                 env["SALESFORCE_SECURITY_TOKEN"] = self.config.security_token
+                env["SALESFORCE_TOKEN"] = self.config.security_token  # Claude Desktop format
             if self.config.instance_url:
                 env["SALESFORCE_INSTANCE_URL"] = self.config.instance_url
                 env["SALESFORCE_LOGIN_URL"] = self.config.instance_url
