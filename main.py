@@ -6,7 +6,8 @@ Designed for seamless deployment on LangGraph Platform with API support.
 """
 
 import os
-from typing import Dict, List, Any
+import re
+from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 
 # Load environment variables (for local development)
@@ -21,9 +22,16 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from typing_extensions import Annotated, TypedDict
 
+# Import Salesforce functionality
+from mcp_client import mcp_client
+from salesforce_tools import get_all_salesforce_tools
+
 class ChatState(TypedDict):
     """State for the chat agent."""
     messages: Annotated[List[BaseMessage], add_messages]
+    salesforce_instance_url: Optional[str]
+    salesforce_access_token: Optional[str]
+    salesforce_authenticated: bool
 
 
 # Initialize the Tavily search tool
@@ -53,8 +61,69 @@ def get_search_tool():
 
 search_tool = get_search_tool()
 
+# Get Salesforce tools
+salesforce_tools = get_all_salesforce_tools()
 
-def create_llm(bind_tools: bool = False) -> ChatOpenAI:
+
+def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract Salesforce credentials from user message"""
+    instance_url = None
+    access_token = None
+    
+    # Look for instance URL patterns
+    instance_patterns = [
+        r"instance.*?url.*?[:\s]+([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
+        r"https?://([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
+        r"instanceUrl.*?[:\s]+([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
+        r"instance.*?[:\s]+([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
+    ]
+    
+    for pattern in instance_patterns:
+        match = re.search(pattern, message_content, re.IGNORECASE)
+        if match:
+            instance_url = f"https://{match.group(1)}"
+            break
+    
+    # Look for access token patterns
+    token_patterns = [
+        r"access.*?token.*?[:\s]+([A-Za-z0-9\.\!]+)",
+        r"accessToken.*?[:\s]+([A-Za-z0-9\.\!]+)", 
+        r"token.*?[:\s]+([A-Za-z0-9\.\!]+)",
+    ]
+    
+    for pattern in token_patterns:
+        match = re.search(pattern, message_content, re.IGNORECASE)
+        if match:
+            token = match.group(1)
+            # Validate token format (should be long and contain certain characters)
+            if len(token) > 20 and ('!' in token or '.' in token):
+                access_token = token
+                break
+    
+    return instance_url, access_token
+
+
+def needs_salesforce_credentials(message_content: str) -> bool:
+    """Check if user is asking about Salesforce functionality"""
+    salesforce_keywords = [
+        'salesforce', 'soql', 'account', 'contact', 'opportunity', 'lead',
+        'case', 'query salesforce', 'salesforce data', 'crm', 'sfdc'
+    ]
+    
+    content_lower = message_content.lower()
+    return any(keyword in content_lower for keyword in salesforce_keywords)
+
+
+def setup_salesforce_connection(instance_url: str, access_token: str) -> bool:
+    """Setup MCP client with Salesforce credentials"""
+    try:
+        mcp_client.set_credentials(instance_url, access_token)
+        return True
+    except Exception:
+        return False
+
+
+def create_llm(bind_tools: bool = False, include_salesforce: bool = False) -> ChatOpenAI:
     """Create and configure the OpenAI LLM instance."""
     llm = ChatOpenAI(
         model="gpt-4o-mini",
@@ -63,8 +132,10 @@ def create_llm(bind_tools: bool = False) -> ChatOpenAI:
     )
     
     if bind_tools:
-        # Bind the search tool to the LLM
-        llm = llm.bind_tools([search_tool])
+        tools_to_bind = [search_tool]
+        if include_salesforce:
+            tools_to_bind.extend(salesforce_tools)
+        llm = llm.bind_tools(tools_to_bind)
     
     return llm
 
@@ -91,27 +162,97 @@ def should_continue(state: ChatState) -> str:
 
 def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
     """
-    Main chat node that processes user input and generates AI responses with search capabilities.
+    Main chat node that processes user input and generates AI responses with Salesforce capabilities.
+    Requires Salesforce credentials before any conversation can proceed.
     
     Args:
         state: Current chat state containing message history
         config: Runtime configuration from LangGraph platform
         
     Returns:
-        Dictionary containing the AI response message
+        Dictionary containing the AI response message and updated state
     """
     try:
-        # Add system message to explain search capabilities
         messages = state["messages"]
-        if not any(msg.content and "I can search the internet" in str(msg.content) for msg in messages):
-            system_message = AIMessage(
-                content="I can search the internet for current information when needed. Just ask me about recent events, news, or current data!"
-            )
-            messages = [system_message] + messages
+        last_message = messages[-1] if messages else None
         
-        llm = create_llm(bind_tools=True)
+        # Initialize state values if not present
+        salesforce_authenticated = state.get("salesforce_authenticated", False)
+        salesforce_instance_url = state.get("salesforce_instance_url")
+        salesforce_access_token = state.get("salesforce_access_token")
+        
+        updates = {}
+        
+        # FIRST: If this is the very first interaction, always ask for credentials
+        if len(messages) == 1 and last_message and not salesforce_authenticated:
+            response = AIMessage(
+                content="🔐 Hello! I'm your Salesforce AI Assistant. Before we can begin, I need your Salesforce credentials to connect to your org.\n\n"
+                       "Please provide your credentials in this format:\n\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "accessToken: your_access_token_here\n\n"
+                       "You can get an access token from:\n"
+                       "• Setup → Apps → App Manager → New Connected App\n"
+                       "• Or through Salesforce REST API authentication\n\n"
+                       "Once connected, I'll be able to help you with all your Salesforce needs!"
+            )
+            return {"messages": [response], **updates}
+        
+        # SECOND: Check if user provided Salesforce credentials
+        if last_message and hasattr(last_message, 'content'):
+            instance_url, access_token = extract_salesforce_credentials(str(last_message.content))
+            
+            if instance_url or access_token:
+                # Update credentials
+                if instance_url:
+                    salesforce_instance_url = instance_url
+                    updates["salesforce_instance_url"] = instance_url
+                if access_token:
+                    salesforce_access_token = access_token
+                    updates["salesforce_access_token"] = access_token
+                
+                # Try to authenticate if we have both
+                if salesforce_instance_url and salesforce_access_token:
+                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token):
+                        salesforce_authenticated = True
+                        updates["salesforce_authenticated"] = True
+                        response = AIMessage(
+                            content=f"✅ Perfect! I've successfully connected to your Salesforce org at {salesforce_instance_url}.\n\n"
+                                   f"I can now help you with:\n"
+                                   f"• 📊 Querying data with SOQL\n"
+                                   f"• 🔍 Searching for records\n"
+                                   f"• 📋 Describing objects and fields\n"
+                                   f"• ➕ Creating new records\n"
+                                   f"• 🔄 Updating existing records\n"
+                                   f"• ❌ Deleting records\n"
+                                   f"• 🌐 Internet search when needed\n\n"
+                                   f"What would you like to do with Salesforce?"
+                        )
+                        return {"messages": [response], **updates}
+                    else:
+                        response = AIMessage(
+                            content="❌ I couldn't connect to Salesforce with those credentials. Please verify:\n\n"
+                                   "• instanceUrl is correct (format: https://yourorg.my.salesforce.com)\n"
+                                   "• accessToken is valid and not expired\n\n"
+                                   "Please try again with the correct credentials."
+                        )
+                        return {"messages": [response], **updates}
+        
+        # THIRD: Block all conversation if not authenticated
+        if not salesforce_authenticated:
+            response = AIMessage(
+                content="🔒 I need your Salesforce credentials before we can continue. Please provide them in this format:\n\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "accessToken: your_access_token_here\n\n"
+                       "I cannot assist with any requests until you provide valid Salesforce credentials."
+            )
+            return {"messages": [response], **updates}
+        
+        # FOURTH: Only if authenticated, proceed with normal conversation
+        # Create LLM with Salesforce tools (since we know user is authenticated)
+        llm = create_llm(bind_tools=True, include_salesforce=True)
         response = llm.invoke(messages)
-        return {"messages": [response]}
+        return {"messages": [response], **updates}
+        
     except Exception as e:
         # Handle errors gracefully
         error_message = AIMessage(
@@ -122,7 +263,7 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
 
 def create_simple_graph() -> StateGraph:
     """
-    Create a simple chat agent graph with internet search capabilities.
+    Create a simple chat agent graph with internet search and Salesforce capabilities.
     
     Returns:
         Compiled StateGraph ready for deployment
@@ -132,7 +273,9 @@ def create_simple_graph() -> StateGraph:
     
     # Add nodes
     workflow.add_node("chat", chat_node)
-    workflow.add_node("tools", ToolNode([search_tool]))
+    # Include both search and Salesforce tools in the ToolNode
+    all_tools = [search_tool] + salesforce_tools
+    workflow.add_node("tools", ToolNode(all_tools))
     
     # Set entry point
     workflow.set_entry_point("chat")
@@ -163,7 +306,8 @@ class AdvancedChatState(ChatState):
 
 def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict[str, Any]:
     """
-    Advanced chat node with session management, enhanced context, and search capabilities.
+    Advanced chat node with session management and Salesforce capabilities.
+    Requires Salesforce credentials before any conversation can proceed.
     
     Args:
         state: Enhanced chat state with user and session information
@@ -173,25 +317,91 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         Dictionary containing the AI response and updated state
     """
     try:
-        llm = create_llm(bind_tools=True)
-        
-        # Add conversation context if this is a continuing conversation
         messages = state["messages"]
         conversation_count = state.get("conversation_count", 0)
+        last_message = messages[-1] if messages else None
         
-        if conversation_count == 0:
-            # First message in session with search capabilities
-            system_context = AIMessage(
-                content="Hello! I'm your advanced AI assistant with internet search capabilities. I can help you with current information, recent events, and research. How can I help you today?"
+        # Initialize Salesforce state values if not present
+        salesforce_authenticated = state.get("salesforce_authenticated", False)
+        salesforce_instance_url = state.get("salesforce_instance_url")
+        salesforce_access_token = state.get("salesforce_access_token")
+        
+        updates = {"conversation_count": conversation_count + 1}
+        
+        # FIRST: If this is the very first interaction, always ask for credentials
+        if conversation_count == 0 and last_message and not salesforce_authenticated:
+            response = AIMessage(
+                content="🔐 Hello! I'm your Advanced Salesforce AI Assistant with session management and enhanced capabilities.\n\n"
+                       "Before we begin our conversation, I need your Salesforce credentials to connect to your org:\n\n"
+                       "Please provide your credentials in this format:\n\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "accessToken: your_access_token_here\n\n"
+                       "You can obtain an access token from:\n"
+                       "• Setup → Apps → App Manager → New Connected App\n"
+                       "• Or through Salesforce REST API authentication\n\n"
+                       "Once authenticated, I'll provide comprehensive Salesforce assistance with session tracking!"
             )
-            messages = [system_context] + messages
+            return {"messages": [response], **updates}
         
+        # SECOND: Check if user provided Salesforce credentials
+        if last_message and hasattr(last_message, 'content'):
+            instance_url, access_token = extract_salesforce_credentials(str(last_message.content))
+            
+            if instance_url or access_token:
+                # Update credentials
+                if instance_url:
+                    salesforce_instance_url = instance_url
+                    updates["salesforce_instance_url"] = instance_url
+                if access_token:
+                    salesforce_access_token = access_token
+                    updates["salesforce_access_token"] = access_token
+                
+                # Try to authenticate if we have both
+                if salesforce_instance_url and salesforce_access_token:
+                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token):
+                        salesforce_authenticated = True
+                        updates["salesforce_authenticated"] = True
+                        response = AIMessage(
+                            content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url}.\n\n"
+                                   f"🚀 **Advanced Features Now Available:**\n"
+                                   f"• 📊 Advanced SOQL querying with analysis\n"
+                                   f"• 🔍 Intelligent record search and filtering\n"
+                                   f"• 📋 Comprehensive object and field exploration\n"
+                                   f"• ➕ Smart record creation with validation\n"
+                                   f"• 🔄 Bulk data operations and updates\n"
+                                   f"• ❌ Safe record deletion with confirmations\n"
+                                   f"• 🌐 Enhanced internet research capabilities\n"
+                                   f"• 💾 Session management and conversation history\n\n"
+                                   f"What advanced Salesforce operation would you like to perform?"
+                        )
+                        return {"messages": [response], **updates}
+                    else:
+                        response = AIMessage(
+                            content="❌ Connection to Salesforce failed. Please verify your credentials:\n\n"
+                                   "• instanceUrl format: https://yourorg.my.salesforce.com\n"
+                                   "• accessToken is valid and not expired\n"
+                                   "• Your user has appropriate permissions\n\n"
+                                   "Please try again with correct credentials."
+                        )
+                        return {"messages": [response], **updates}
+        
+        # THIRD: Block all conversation if not authenticated
+        if not salesforce_authenticated:
+            response = AIMessage(
+                content="🔒 **Authentication Required**\n\n"
+                       "I cannot proceed without valid Salesforce credentials. Please provide:\n\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "accessToken: your_access_token_here\n\n"
+                       "All advanced features require proper Salesforce authentication."
+            )
+            return {"messages": [response], **updates}
+        
+        # FOURTH: Only if authenticated, proceed with advanced conversation
+        # Create LLM with full Salesforce capabilities (since user is authenticated)
+        llm = create_llm(bind_tools=True, include_salesforce=True)
         response = llm.invoke(messages)
         
-        return {
-            "messages": [response],
-            "conversation_count": conversation_count + 1
-        }
+        return {"messages": [response], **updates}
         
     except Exception as e:
         # Handle errors gracefully with session context
@@ -227,7 +437,7 @@ def should_continue_advanced(state: AdvancedChatState) -> str:
 
 def create_advanced_graph() -> StateGraph:
     """
-    Create an advanced chat agent graph with session management and search capabilities.
+    Create an advanced chat agent graph with session management, search, and Salesforce capabilities.
     
     Returns:
         Compiled StateGraph with enhanced features
@@ -237,7 +447,9 @@ def create_advanced_graph() -> StateGraph:
     
     # Add nodes
     workflow.add_node("advanced_chat", advanced_chat_node)
-    workflow.add_node("tools", ToolNode([search_tool]))
+    # Include both search and Salesforce tools in the ToolNode
+    all_tools = [search_tool] + salesforce_tools
+    workflow.add_node("tools", ToolNode(all_tools))
     
     # Set entry point
     workflow.set_entry_point("advanced_chat")
@@ -255,7 +467,6 @@ def create_advanced_graph() -> StateGraph:
     # After running tools, go back to advanced chat
     workflow.add_edge("tools", "advanced_chat")
     
-    
     # Compile and return
     return workflow.compile()
 
@@ -269,57 +480,103 @@ advanced_graph = create_advanced_graph()
 def main():
     """
     Local testing function - not used in platform deployment.
-    Run this file directly to test the agent locally.
+    Run this file directly to test the Salesforce-integrated agent locally.
     """
-    print("Testing Simple Chat Agent with Search Capabilities...")
+    print("🚀 Testing Salesforce AI Agent Integration...")
+    print("="*60)
     
-    # Test the simple graph
+    print("1. Testing Simple Chat Agent - First Interaction (Should ask for credentials)...")
+    
+    # Test the simple graph - first interaction
     test_state = {
-        "messages": [HumanMessage(content="Hello! Can you explain what you do?")]
+        "messages": [HumanMessage(content="Hello! Can you help me with Salesforce?")],
+        "salesforce_authenticated": False,
+        "salesforce_instance_url": None,
+        "salesforce_access_token": None
     }
     
     result = graph.invoke(test_state)
-    print("Agent Response:", result["messages"][-1].content)
+    print("Agent Response:")
+    print(result["messages"][-1].content)
     
-    print("\n" + "="*50)
-    print("Testing Search Functionality...")
+    print("\n" + "="*60)
+    print("2. Testing Credential Provision (Mock credentials)...")
     
-    # Test search functionality
-    search_test_state = {
-        "messages": [HumanMessage(content="What are the latest developments in AI technology in 2024?")]
+    # Test credential provision
+    cred_test_state = {
+        "messages": [
+            HumanMessage(content="Hello! Can you help me with Salesforce?"),
+            HumanMessage(content="instanceUrl: https://test.my.salesforce.com\naccessToken: mock_token_123456789012345678901234567890")
+        ],
+        "salesforce_authenticated": False,
+        "salesforce_instance_url": None,
+        "salesforce_access_token": None
     }
     
     try:
-        search_result = graph.invoke(search_test_state)
-        print("Search-enabled Response:")
-        for msg in search_result["messages"]:
-            if hasattr(msg, 'content') and msg.content:
-                print(f"- {msg.content}")
+        cred_result = graph.invoke(cred_test_state)
+        print("Credential Response:")
+        print(cred_result["messages"][-1].content)
+        print(f"Authentication Status: {cred_result.get('salesforce_authenticated', False)}")
     except Exception as e:
-        print(f"Search test failed (likely missing TAVILY_API_KEY): {e}")
+        print(f"Note: Mock credentials failed connection (expected): {e}")
     
-    print("\n" + "="*50)
-    print("Testing Advanced Chat Agent with Search...")
+    print("\n" + "="*60)
+    print("3. Testing Advanced Chat Agent - First Interaction...")
     
     # Test the advanced graph
     advanced_test_state = {
-        "messages": [HumanMessage(content="What are the current trends in renewable energy?")],
+        "messages": [HumanMessage(content="Hello, I need help with Salesforce data.")],
         "user_id": "test_user",
         "session_id": "test_session",
-        "conversation_count": 0
+        "conversation_count": 0,
+        "salesforce_authenticated": False,
+        "salesforce_instance_url": None,
+        "salesforce_access_token": None
     }
     
     try:
         advanced_result = advanced_graph.invoke(advanced_test_state)
         print("Advanced Agent Response:")
-        for msg in advanced_result["messages"]:
-            if hasattr(msg, 'content') and msg.content:
-                print(f"- {msg.content}")
-        print("Conversation Count:", advanced_result["conversation_count"])
+        print(advanced_result["messages"][-1].content)
+        print(f"Conversation Count: {advanced_result['conversation_count']}")
     except Exception as e:
-        print(f"Advanced search test failed (likely missing TAVILY_API_KEY): {e}")
+        print(f"Advanced agent test failed: {e}")
     
-    print("\nNote: To enable search functionality, set TAVILY_API_KEY in your .env file.")
+    print("\n" + "="*60)
+    print("4. Testing Blocking Behavior (Should block without credentials)...")
+    
+    # Test that agent blocks without credentials
+    block_test_state = {
+        "messages": [
+            HumanMessage(content="Hello!"),
+            HumanMessage(content="Can you query my Account data?")
+        ],
+        "salesforce_authenticated": False,
+        "salesforce_instance_url": None,
+        "salesforce_access_token": None
+    }
+    
+    try:
+        block_result = graph.invoke(block_test_state)
+        print("Blocking Response:")
+        print(block_result["messages"][-1].content)
+    except Exception as e:
+        print(f"Block test failed: {e}")
+    
+    print("\n" + "="*60)
+    print("✅ Integration Testing Complete!")
+    print("\n📋 Summary:")
+    print("• Agent now requires Salesforce credentials on first interaction")
+    print("• Blocks all conversation until valid credentials provided")
+    print("• Integrates with MCP server at mcp-server-salesforce-production.up.railway.app")
+    print("• Provides comprehensive Salesforce tools once authenticated")
+    print("• Supports both simple and advanced conversation modes")
+    
+    print("\n🔗 To test with real credentials:")
+    print("1. Get your Salesforce instanceUrl (e.g., https://yourorg.my.salesforce.com)")
+    print("2. Get a valid access token from Salesforce")
+    print("3. Provide them when the agent asks for credentials")
 
 
 if __name__ == "__main__":
