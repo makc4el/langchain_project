@@ -7,8 +7,12 @@ at mcp-server-salesforce-production.up.railway.app
 
 import json
 import httpx
+import asyncio
+import logging
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 class SalesforceCredentials(BaseModel):
@@ -18,12 +22,17 @@ class SalesforceCredentials(BaseModel):
 
 
 class MCPSalesforceClient:
-    """HTTP client for the deployed MCP Salesforce server"""
+    """HTTP client for the deployed MCP Salesforce server with resilience"""
     
     def __init__(self, server_url: str = "https://mcp-server-salesforce-production.up.railway.app"):
         self.server_url = server_url.rstrip('/')
         self.credentials: Optional[SalesforceCredentials] = None
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0),  # Increased timeout
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        )
+        self.max_retries = 3
+        self.retry_delay = 2.0
     
     def set_credentials(self, instance_url: str, access_token: str):
         """Set Salesforce credentials for API calls"""
@@ -43,29 +52,43 @@ class MCPSalesforceClient:
         }
     
     async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """Call a tool on the MCP server"""
-        try:
-            payload = {
-                "method": "tools/call",
-                "params": {
-                    "name": tool_name,
-                    "arguments": arguments
-                }
-            }
-            
-            response = await self.client.post(
-                f"{self.server_url}/mcp",
-                json=payload,
-                headers=self._get_headers()
-            )
-            
-            if response.status_code != 200:
-                raise Exception(f"MCP server error: {response.status_code} - {response.text}")
-            
-            return response.json()
+        """Call a tool on the MCP server with retry logic"""
+        last_exception = None
         
-        except Exception as e:
-            raise Exception(f"Failed to call MCP tool '{tool_name}': {str(e)}")
+        for attempt in range(self.max_retries):
+            try:
+                payload = {
+                    "method": "tools/call",
+                    "params": {
+                        "name": tool_name,
+                        "arguments": arguments
+                    }
+                }
+                
+                logger.info(f"Calling MCP tool '{tool_name}' (attempt {attempt + 1})")
+                
+                response = await self.client.post(
+                    f"{self.server_url}/mcp",
+                    json=payload,
+                    headers=self._get_headers()
+                )
+                
+                if response.status_code != 200:
+                    raise Exception(f"MCP server error: {response.status_code} - {response.text}")
+                
+                logger.info(f"Successfully called MCP tool '{tool_name}'")
+                return response.json()
+            
+            except Exception as e:
+                last_exception = e
+                logger.warning(f"Attempt {attempt + 1} failed for tool '{tool_name}': {str(e)}")
+                
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(self.retry_delay * (attempt + 1))  # Exponential backoff
+                else:
+                    logger.error(f"All attempts failed for tool '{tool_name}'")
+        
+        raise Exception(f"Failed to call MCP tool '{tool_name}' after {self.max_retries} attempts: {str(last_exception)}")
     
     async def list_tools(self) -> List[Dict[str, Any]]:
         """Get list of available tools from the MCP server"""

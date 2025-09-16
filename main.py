@@ -7,11 +7,22 @@ Designed for seamless deployment on LangGraph Platform with API support.
 
 import os
 import re
+import logging
 from typing import Dict, List, Any, Optional
 from dotenv import load_dotenv
 
 # Load environment variables (for local development)
 load_dotenv()
+
+# Import configuration
+from config import config
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, config.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -70,36 +81,46 @@ def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str],
     instance_url = None
     access_token = None
     
-    # Look for instance URL patterns
+    # Look for instance URL patterns - Updated to handle various Salesforce domains
     instance_patterns = [
-        r"instance.*?url.*?[:\s]+([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
-        r"https?://([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
-        r"instanceUrl.*?[:\s]+([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
-        r"instance.*?[:\s]+([a-zA-Z0-9\-\.]+\.my\.salesforce\.com)",
+        # Direct URL patterns (with https://)
+        r"instance.*?url.*?[:\s]+(https://[a-zA-Z0-9\-\.]+\.(?:my\.salesforce\.com|lightning\.force\.com|develop\.lightning\.force\.com)/?)",
+        r"instanceUrl.*?[:\s]+(https://[a-zA-Z0-9\-\.]+\.(?:my\.salesforce\.com|lightning\.force\.com|develop\.lightning\.force\.com)/?)",
+        r"(https://[a-zA-Z0-9\-\.]+\.(?:my\.salesforce\.com|lightning\.force\.com|develop\.lightning\.force\.com)/?)",
+        # Domain-only patterns (without https://)
+        r"instance.*?url.*?[:\s]+([a-zA-Z0-9\-\.]+\.(?:my\.salesforce\.com|lightning\.force\.com|develop\.lightning\.force\.com))",
+        r"instanceUrl.*?[:\s]+([a-zA-Z0-9\-\.]+\.(?:my\.salesforce\.com|lightning\.force\.com|develop\.lightning\.force\.com))",
+        r"instance.*?[:\s]+([a-zA-Z0-9\-\.]+\.(?:my\.salesforce\.com|lightning\.force\.com|develop\.lightning\.force\.com))",
     ]
     
     for pattern in instance_patterns:
         match = re.search(pattern, message_content, re.IGNORECASE)
         if match:
-            instance_url = f"https://{match.group(1)}"
+            url = match.group(1)
+            # Ensure URL starts with https://
+            if url.startswith('https://'):
+                instance_url = url.rstrip('/')
+            else:
+                instance_url = f"https://{url.rstrip('/')}"
             break
     
-    # Look for access token patterns
+    # Look for access token patterns - Updated to handle underscores, equals signs, and other characters
     token_patterns = [
-        r"access.*?token.*?[:\s]+([A-Za-z0-9\.\!]+)",
-        r"accessToken.*?[:\s]+([A-Za-z0-9\.\!]+)", 
-        r"token.*?[:\s]+([A-Za-z0-9\.\!]+)",
+        r"access.*?token.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
+        r"accessToken.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)", 
+        r"token.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
     ]
     
     for pattern in token_patterns:
         match = re.search(pattern, message_content, re.IGNORECASE)
         if match:
             token = match.group(1)
-            # Validate token format (should be long and contain certain characters)
-            if len(token) > 20 and ('!' in token or '.' in token):
+            # More flexible token validation - just check minimum length
+            if len(token) > 15:
                 access_token = token
                 break
     
+    logger.info(f"Extracted credentials - instanceUrl: {instance_url}, accessToken present: {bool(access_token)}")
     return instance_url, access_token
 
 
