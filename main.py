@@ -41,8 +41,7 @@ class ChatState(TypedDict):
     """State for the chat agent."""
     messages: Annotated[List[BaseMessage], add_messages]
     salesforce_instance_url: Optional[str]
-    salesforce_access_token: Optional[str]
-    salesforce_auth_code: Optional[str]
+    salesforce_access_token: Optional[str]  # Obtained after OAuth exchange
     salesforce_authenticated: bool
 
 
@@ -77,14 +76,13 @@ search_tool = get_search_tool()
 salesforce_tools = get_all_salesforce_tools()
 
 
-def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Extract Salesforce credentials from user message
+def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract Salesforce credentials from user message (OAuth Authorization Code only)
     
     Returns:
-        tuple: (instance_url, access_token, auth_code)
+        tuple: (instance_url, auth_code)
     """
     instance_url = None
-    access_token = None
     auth_code = None
     
     # Look for instance URL patterns - Updated to handle various Salesforce domains
@@ -110,23 +108,7 @@ def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str],
                 instance_url = f"https://{url.rstrip('/')}"
             break
     
-    # Look for access token patterns - Updated to handle underscores, equals signs, and other characters
-    token_patterns = [
-        r"access.*?token.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
-        r"accessToken.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)", 
-        r"token.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
-    ]
-    
-    for pattern in token_patterns:
-        match = re.search(pattern, message_content, re.IGNORECASE)
-        if match:
-            token = match.group(1)
-            # More flexible token validation - just check minimum length
-            if len(token) > 15:
-                access_token = token
-                break
-    
-    # Look for auth code patterns (OAuth flow)
+    # Look for auth code patterns (OAuth flow only)
     auth_code_patterns = [
         r"auth.*?code.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
         r"authCode.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
@@ -138,13 +120,13 @@ def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str],
         match = re.search(pattern, message_content, re.IGNORECASE)
         if match:
             code = match.group(1)
-            # Auth codes are typically shorter than access tokens
-            if len(code) > 10 and not access_token:  # Only use auth code if no access token
+            # Auth codes should be reasonable length
+            if len(code) > 10:
                 auth_code = code
                 break
     
-    logger.info(f"Extracted credentials - instanceUrl: {instance_url}, accessToken present: {bool(access_token)}, authCode present: {bool(auth_code)}")
-    return instance_url, access_token, auth_code
+    logger.info(f"Extracted credentials - instanceUrl: {instance_url}, authCode present: {bool(auth_code)}")
+    return instance_url, auth_code
 
 
 def needs_salesforce_credentials(message_content: str) -> bool:
@@ -158,15 +140,15 @@ def needs_salesforce_credentials(message_content: str) -> bool:
     return any(keyword in content_lower for keyword in salesforce_keywords)
 
 
-def setup_salesforce_connection(instance_url: str, access_token: Optional[str] = None, auth_code: Optional[str] = None) -> tuple[bool, Optional[str]]:
-    """Setup MCP client with Salesforce credentials
+def setup_salesforce_connection(instance_url: str, auth_code: str) -> tuple[bool, Optional[str]]:
+    """Setup MCP client with Salesforce credentials using OAuth Authorization Code
     
     Returns:
-        tuple: (success, current_access_token) - current_access_token may be updated after OAuth exchange
+        tuple: (success, access_token) - access_token obtained after OAuth exchange
     """
     try:
-        mcp_client.set_credentials(instance_url, access_token, auth_code)
-        # Return the current access token (which may be updated after OAuth exchange)
+        mcp_client.set_credentials(instance_url, None, auth_code)
+        # Return the current access token (which will be updated after OAuth exchange)
         current_token = mcp_client.get_current_access_token()
         return True, current_token
     except Exception as e:
