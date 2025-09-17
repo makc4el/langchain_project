@@ -42,6 +42,7 @@ class ChatState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     salesforce_instance_url: Optional[str]
     salesforce_access_token: Optional[str]
+    salesforce_auth_code: Optional[str]
     salesforce_authenticated: bool
 
 
@@ -76,10 +77,15 @@ search_tool = get_search_tool()
 salesforce_tools = get_all_salesforce_tools()
 
 
-def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str], Optional[str]]:
-    """Extract Salesforce credentials from user message"""
+def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Extract Salesforce credentials from user message
+    
+    Returns:
+        tuple: (instance_url, access_token, auth_code)
+    """
     instance_url = None
     access_token = None
+    auth_code = None
     
     # Look for instance URL patterns - Updated to handle various Salesforce domains
     instance_patterns = [
@@ -120,8 +126,25 @@ def extract_salesforce_credentials(message_content: str) -> tuple[Optional[str],
                 access_token = token
                 break
     
-    logger.info(f"Extracted credentials - instanceUrl: {instance_url}, accessToken present: {bool(access_token)}")
-    return instance_url, access_token
+    # Look for auth code patterns (OAuth flow)
+    auth_code_patterns = [
+        r"auth.*?code.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
+        r"authCode.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
+        r"authorization.*?code.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
+        r"code.*?[:\s]+([A-Za-z0-9\.\!\-_=+/]+)",
+    ]
+    
+    for pattern in auth_code_patterns:
+        match = re.search(pattern, message_content, re.IGNORECASE)
+        if match:
+            code = match.group(1)
+            # Auth codes are typically shorter than access tokens
+            if len(code) > 10 and not access_token:  # Only use auth code if no access token
+                auth_code = code
+                break
+    
+    logger.info(f"Extracted credentials - instanceUrl: {instance_url}, accessToken present: {bool(access_token)}, authCode present: {bool(auth_code)}")
+    return instance_url, access_token, auth_code
 
 
 def needs_salesforce_credentials(message_content: str) -> bool:
@@ -135,12 +158,13 @@ def needs_salesforce_credentials(message_content: str) -> bool:
     return any(keyword in content_lower for keyword in salesforce_keywords)
 
 
-def setup_salesforce_connection(instance_url: str, access_token: str) -> bool:
+def setup_salesforce_connection(instance_url: str, access_token: Optional[str] = None, auth_code: Optional[str] = None) -> bool:
     """Setup MCP client with Salesforce credentials"""
     try:
-        mcp_client.set_credentials(instance_url, access_token)
+        mcp_client.set_credentials(instance_url, access_token, auth_code)
         return True
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to setup Salesforce connection: {e}")
         return False
 
 
@@ -201,6 +225,7 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
         salesforce_authenticated = state.get("salesforce_authenticated", False)
         salesforce_instance_url = state.get("salesforce_instance_url")
         salesforce_access_token = state.get("salesforce_access_token")
+        salesforce_auth_code = state.get("salesforce_auth_code")
         
         updates = {}
         
@@ -208,21 +233,26 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
         if len(messages) == 1 and last_message and not salesforce_authenticated:
             response = AIMessage(
                 content="🔐 Hello! I'm your Salesforce AI Assistant. Before we can begin, I need your Salesforce credentials to connect to your org.\n\n"
-                       "Please provide your credentials in this format:\n\n"
+                       "Please provide your credentials in one of these formats:\n\n"
+                       "**Option 1 - Direct Access Token:**\n"
                        "instanceUrl: https://yourorg.my.salesforce.com\n"
                        "accessToken: your_access_token_here\n\n"
-                       "You can get an access token from:\n"
+                       "**Option 2 - OAuth Authorization Code:**\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "authCode: your_auth_code_here\n\n"
+                       "You can get credentials from:\n"
                        "• Setup → Apps → App Manager → New Connected App\n"
-                       "• Or through Salesforce REST API authentication\n\n"
+                       "• Or through Salesforce OAuth flow\n"
+                       "• Or use Salesforce CLI: `sf org display --verbose`\n\n"
                        "Once connected, I'll be able to help you with all your Salesforce needs!"
             )
             return {"messages": [response], **updates}
         
         # SECOND: Check if user provided Salesforce credentials
         if last_message and hasattr(last_message, 'content'):
-            instance_url, access_token = extract_salesforce_credentials(str(last_message.content))
+            instance_url, access_token, auth_code = extract_salesforce_credentials(str(last_message.content))
             
-            if instance_url or access_token:
+            if instance_url or access_token or auth_code:
                 # Update credentials
                 if instance_url:
                     salesforce_instance_url = instance_url
@@ -230,14 +260,18 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
                 if access_token:
                     salesforce_access_token = access_token
                     updates["salesforce_access_token"] = access_token
+                if auth_code:
+                    salesforce_auth_code = auth_code
+                    updates["salesforce_auth_code"] = auth_code
                 
-                # Try to authenticate if we have both
-                if salesforce_instance_url and salesforce_access_token:
-                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token):
+                # Try to authenticate if we have instance URL and either token or code
+                if salesforce_instance_url and (salesforce_access_token or salesforce_auth_code):
+                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token, salesforce_auth_code):
                         salesforce_authenticated = True
                         updates["salesforce_authenticated"] = True
+                        auth_method = "access token" if salesforce_access_token else "authorization code"
                         response = AIMessage(
-                            content=f"✅ Perfect! I've successfully connected to your Salesforce org at {salesforce_instance_url}.\n\n"
+                            content=f"✅ Perfect! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
                                    f"I can now help you with:\n"
                                    f"• 📊 Querying data with SOQL\n"
                                    f"• 🔍 Searching for records\n"
@@ -253,7 +287,8 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
                         response = AIMessage(
                             content="❌ I couldn't connect to Salesforce with those credentials. Please verify:\n\n"
                                    "• instanceUrl is correct (format: https://yourorg.my.salesforce.com)\n"
-                                   "• accessToken is valid and not expired\n\n"
+                                   "• accessToken is valid and not expired (if using access token)\n"
+                                   "• authCode is valid and not expired (if using OAuth flow)\n\n"
                                    "Please try again with the correct credentials."
                         )
                         return {"messages": [response], **updates}
@@ -261,9 +296,13 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
         # THIRD: Block all conversation if not authenticated
         if not salesforce_authenticated:
             response = AIMessage(
-                content="🔒 I need your Salesforce credentials before we can continue. Please provide them in this format:\n\n"
+                content="🔒 I need your Salesforce credentials before we can continue. Please provide them in one of these formats:\n\n"
+                       "**Option 1 - Direct Access Token:**\n"
                        "instanceUrl: https://yourorg.my.salesforce.com\n"
                        "accessToken: your_access_token_here\n\n"
+                       "**Option 2 - OAuth Authorization Code:**\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "authCode: your_auth_code_here\n\n"
                        "I cannot assist with any requests until you provide valid Salesforce credentials."
             )
             return {"messages": [response], **updates}
@@ -346,6 +385,7 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         salesforce_authenticated = state.get("salesforce_authenticated", False)
         salesforce_instance_url = state.get("salesforce_instance_url")
         salesforce_access_token = state.get("salesforce_access_token")
+        salesforce_auth_code = state.get("salesforce_auth_code")
         
         updates = {"conversation_count": conversation_count + 1}
         
@@ -354,21 +394,26 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
             response = AIMessage(
                 content="🔐 Hello! I'm your Advanced Salesforce AI Assistant with session management and enhanced capabilities.\n\n"
                        "Before we begin our conversation, I need your Salesforce credentials to connect to your org:\n\n"
-                       "Please provide your credentials in this format:\n\n"
+                       "Please provide your credentials in one of these formats:\n\n"
+                       "**Option 1 - Direct Access Token:**\n"
                        "instanceUrl: https://yourorg.my.salesforce.com\n"
                        "accessToken: your_access_token_here\n\n"
-                       "You can obtain an access token from:\n"
+                       "**Option 2 - OAuth Authorization Code:**\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "authCode: your_auth_code_here\n\n"
+                       "You can obtain credentials from:\n"
                        "• Setup → Apps → App Manager → New Connected App\n"
-                       "• Or through Salesforce REST API authentication\n\n"
+                       "• Or through Salesforce OAuth flow\n"
+                       "• Or use Salesforce CLI: `sf org display --verbose`\n\n"
                        "Once authenticated, I'll provide comprehensive Salesforce assistance with session tracking!"
             )
             return {"messages": [response], **updates}
         
         # SECOND: Check if user provided Salesforce credentials
         if last_message and hasattr(last_message, 'content'):
-            instance_url, access_token = extract_salesforce_credentials(str(last_message.content))
+            instance_url, access_token, auth_code = extract_salesforce_credentials(str(last_message.content))
             
-            if instance_url or access_token:
+            if instance_url or access_token or auth_code:
                 # Update credentials
                 if instance_url:
                     salesforce_instance_url = instance_url
@@ -376,14 +421,18 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                 if access_token:
                     salesforce_access_token = access_token
                     updates["salesforce_access_token"] = access_token
+                if auth_code:
+                    salesforce_auth_code = auth_code
+                    updates["salesforce_auth_code"] = auth_code
                 
-                # Try to authenticate if we have both
-                if salesforce_instance_url and salesforce_access_token:
-                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token):
+                # Try to authenticate if we have instance URL and either token or code
+                if salesforce_instance_url and (salesforce_access_token or salesforce_auth_code):
+                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token, salesforce_auth_code):
                         salesforce_authenticated = True
                         updates["salesforce_authenticated"] = True
+                        auth_method = "access token" if salesforce_access_token else "authorization code"
                         response = AIMessage(
-                            content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url}.\n\n"
+                            content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
                                    f"🚀 **Advanced Features Now Available:**\n"
                                    f"• 📊 Advanced SOQL querying with analysis\n"
                                    f"• 🔍 Intelligent record search and filtering\n"
@@ -400,7 +449,8 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                         response = AIMessage(
                             content="❌ Connection to Salesforce failed. Please verify your credentials:\n\n"
                                    "• instanceUrl format: https://yourorg.my.salesforce.com\n"
-                                   "• accessToken is valid and not expired\n"
+                                   "• accessToken is valid and not expired (if using access token)\n"
+                                   "• authCode is valid and not expired (if using OAuth flow)\n"
                                    "• Your user has appropriate permissions\n\n"
                                    "Please try again with correct credentials."
                         )
@@ -410,9 +460,13 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         if not salesforce_authenticated:
             response = AIMessage(
                 content="🔒 **Authentication Required**\n\n"
-                       "I cannot proceed without valid Salesforce credentials. Please provide:\n\n"
+                       "I cannot proceed without valid Salesforce credentials. Please provide in one of these formats:\n\n"
+                       "**Option 1 - Direct Access Token:**\n"
                        "instanceUrl: https://yourorg.my.salesforce.com\n"
                        "accessToken: your_access_token_here\n\n"
+                       "**Option 2 - OAuth Authorization Code:**\n"
+                       "instanceUrl: https://yourorg.my.salesforce.com\n"
+                       "authCode: your_auth_code_here\n\n"
                        "All advanced features require proper Salesforce authentication."
             )
             return {"messages": [response], **updates}
@@ -513,7 +567,8 @@ def main():
         "messages": [HumanMessage(content="Hello! Can you help me with Salesforce?")],
         "salesforce_authenticated": False,
         "salesforce_instance_url": None,
-        "salesforce_access_token": None
+        "salesforce_access_token": None,
+        "salesforce_auth_code": None
     }
     
     result = graph.invoke(test_state)
@@ -523,7 +578,7 @@ def main():
     print("\n" + "="*60)
     print("2. Testing Credential Provision (Mock credentials)...")
     
-    # Test credential provision
+    # Test credential provision (access token)
     cred_test_state = {
         "messages": [
             HumanMessage(content="Hello! Can you help me with Salesforce?"),
@@ -531,7 +586,8 @@ def main():
         ],
         "salesforce_authenticated": False,
         "salesforce_instance_url": None,
-        "salesforce_access_token": None
+        "salesforce_access_token": None,
+        "salesforce_auth_code": None
     }
     
     try:
@@ -541,6 +597,29 @@ def main():
         print(f"Authentication Status: {cred_result.get('salesforce_authenticated', False)}")
     except Exception as e:
         print(f"Note: Mock credentials failed connection (expected): {e}")
+    
+    print("\n" + "="*60)
+    print("2b. Testing OAuth Code Provision (Mock auth code)...")
+    
+    # Test auth code provision
+    auth_code_test_state = {
+        "messages": [
+            HumanMessage(content="Hello! Can you help me with Salesforce?"),
+            HumanMessage(content="instanceUrl: https://test.my.salesforce.com\nauthCode: mock_auth_code_12345678901234567890")
+        ],
+        "salesforce_authenticated": False,
+        "salesforce_instance_url": None,
+        "salesforce_access_token": None,
+        "salesforce_auth_code": None
+    }
+    
+    try:
+        auth_result = graph.invoke(auth_code_test_state)
+        print("Auth Code Response:")
+        print(auth_result["messages"][-1].content)
+        print(f"Authentication Status: {auth_result.get('salesforce_authenticated', False)}")
+    except Exception as e:
+        print(f"Note: Mock auth code failed connection (expected): {e}")
     
     print("\n" + "="*60)
     print("3. Testing Advanced Chat Agent - First Interaction...")
@@ -553,7 +632,8 @@ def main():
         "conversation_count": 0,
         "salesforce_authenticated": False,
         "salesforce_instance_url": None,
-        "salesforce_access_token": None
+        "salesforce_access_token": None,
+        "salesforce_auth_code": None
     }
     
     try:
@@ -575,7 +655,8 @@ def main():
         ],
         "salesforce_authenticated": False,
         "salesforce_instance_url": None,
-        "salesforce_access_token": None
+        "salesforce_access_token": None,
+        "salesforce_auth_code": None
     }
     
     try:
@@ -589,15 +670,22 @@ def main():
     print("✅ Integration Testing Complete!")
     print("\n📋 Summary:")
     print("• Agent now requires Salesforce credentials on first interaction")
-    print("• Blocks all conversation until valid credentials provided")
-    print("• Integrates with MCP server at mcp-server-salesforce-production.up.railway.app")
+    print("• Blocks all conversation until valid credentials provided") 
+    print("• Supports both access tokens and OAuth authorization codes")
+    print("• MCP server URL configurable via MCP_SALESFORCE_SERVER_URL env var")
+    print("• Integrates with MCP server (default: mcp-server-salesforce-production.up.railway.app)")
     print("• Provides comprehensive Salesforce tools once authenticated")
     print("• Supports both simple and advanced conversation modes")
     
     print("\n🔗 To test with real credentials:")
+    print("**Option 1 - Access Token:**")
     print("1. Get your Salesforce instanceUrl (e.g., https://yourorg.my.salesforce.com)")
-    print("2. Get a valid access token from Salesforce")
-    print("3. Provide them when the agent asks for credentials")
+    print("2. Get a valid access token from Salesforce (sf org display --verbose)")
+    print("3. Provide: instanceUrl: <url> and accessToken: <token>")
+    print("\n**Option 2 - OAuth Code:**")
+    print("1. Get your Salesforce instanceUrl")
+    print("2. Get an OAuth authorization code from Salesforce OAuth flow")
+    print("3. Provide: instanceUrl: <url> and authCode: <code>")
 
 
 if __name__ == "__main__":

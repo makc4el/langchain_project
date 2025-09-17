@@ -34,10 +34,15 @@ class Config:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
     # MCP Server Configuration
-    MCP_SALESFORCE_URL: str = os.getenv(
-        "MCP_SALESFORCE_URL", 
+    MCP_SALESFORCE_SERVER_URL: str = os.getenv(
+        "MCP_SALESFORCE_SERVER_URL", 
         "https://mcp-server-salesforce-production.up.railway.app"
     )
+    
+    # Optional Salesforce OAuth Configuration (for auth code flow in MCP server)
+    SALESFORCE_CLIENT_ID: Optional[str] = os.getenv("SALESFORCE_CLIENT_ID")
+    SALESFORCE_CLIENT_SECRET: Optional[str] = os.getenv("SALESFORCE_CLIENT_SECRET")
+    SALESFORCE_REDIRECT_URI: str = os.getenv("SALESFORCE_REDIRECT_URI", "http://localhost:3000/callback")
     
     @classmethod
     def validate_required_keys(cls) -> list[str]:
