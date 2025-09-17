@@ -70,17 +70,38 @@ class MCPSalesforceClient:
         logger.info(f"MCP Client initialized with server URL: {self.server_url}")
         logger.info(f"Client configuration: max_retries={self.max_retries}, timeout=120s")
     
+    def _normalize_instance_url(self, instance_url: str) -> str:
+        """Normalize instance URL to proper Salesforce format
+        
+        Converts Lightning URLs to proper instance URLs for API calls
+        """
+        normalized_url = instance_url.rstrip('/')
+        
+        # Convert Lightning URLs to proper Salesforce instance URLs
+        if 'lightning.force.com' in normalized_url:
+            if 'develop.lightning.force.com' in normalized_url:
+                normalized_url = normalized_url.replace('develop.lightning.force.com', 'develop.my.salesforce.com')
+            else:
+                normalized_url = normalized_url.replace('lightning.force.com', 'my.salesforce.com')
+            
+            logger.info(f"Converted Lightning URL to proper instance URL: {normalized_url}")
+        
+        return normalized_url
+    
     def set_credentials(self, instance_url: str, access_token: Optional[str] = None, auth_code: Optional[str] = None):
         """Set Salesforce credentials for API calls"""
         if not access_token and not auth_code:
             raise ValueError("Either access_token or auth_code must be provided")
         
+        # Normalize the instance URL
+        normalized_instance_url = self._normalize_instance_url(instance_url)
+        
         self.credentials = SalesforceCredentials(
-            instanceUrl=instance_url,
+            instanceUrl=normalized_instance_url,
             accessToken=access_token,
             authCode=auth_code
         )
-        logger.info(f"Credentials set for instance: {instance_url}, using {'access token' if access_token else 'auth code'}")
+        logger.info(f"Credentials set for instance: {normalized_instance_url}, using {'access token' if access_token else 'auth code'}")
     
     def get_current_access_token(self) -> Optional[str]:
         """Get the current stored access token if available"""

@@ -31,11 +31,17 @@ def example_usage():
     print("\n1. First, set your Salesforce credentials:")
     print("   mcp_client.set_credentials('https://your-instance.salesforce.com', 'your_access_token')")
     print("   # Or use OAuth code: mcp_client.set_credentials('https://your-instance.salesforce.com', auth_code='your_code')")
+    print("   # 🔧 FIXED: Lightning URLs are now automatically converted to proper format")
+    print("   # You can now use: mcp_client.set_credentials('https://your-instance.lightning.force.com', ...)")
     
     # STEP 2: Create custom fields
     print("\n2. Create custom fields:")
     
     examples = [
+        {
+            "description": "Create the requested test_lead_string field",
+            "input": "create|Lead|test_lead_string|Text|Test Lead String|length:255|description:A custom field for testing lead management"
+        },
         {
             "description": "Create a simple text field",
             "input": "create|Lead|testing_string|Text|Testing String|length:255|description:A custom field for testing"
@@ -76,6 +82,16 @@ def example_usage():
     print("   # Change field label or properties:")
     print("   update_input = 'update|Lead|testing_string|label:Updated Testing String|description:Updated description'")
     print("   result = field_tool.func(update_input)")
+    
+    # STEP 5: Field visibility note
+    print("\n5. Field visibility:")
+    print("   📋 After creating a custom field, it will automatically be available in:")
+    print("   • Lead detail pages (where you view individual lead records)")
+    print("   • Lead edit forms")
+    print("   • List views (if configured)")
+    print("   • API queries and operations")
+    print("   💡 To ensure it appears in the Details tab, the field is automatically granted")
+    print("      Field Level Security permissions to System Administrator profile")
     
     print("\n" + "=" * 40)
     print("📋 Field Creation Format:")
