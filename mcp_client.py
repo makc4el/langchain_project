@@ -82,6 +82,14 @@ class MCPSalesforceClient:
         )
         logger.info(f"Credentials set for instance: {instance_url}, using {'access token' if access_token else 'auth code'}")
     
+    def get_current_access_token(self) -> Optional[str]:
+        """Get the current stored access token if available"""
+        return self.credentials.accessToken if self.credentials else None
+    
+    def get_current_instance_url(self) -> Optional[str]:
+        """Get the current stored instance URL if available"""
+        return self.credentials.instanceUrl if self.credentials else None
+    
     def _get_headers(self) -> Dict[str, str]:
         """Get headers including Salesforce credentials"""
         if not self.credentials:
@@ -117,7 +125,20 @@ class MCPSalesforceClient:
                 # Enhanced error handling for different status codes
                 if response.status_code == 200:
                     logger.info(f"Successfully called MCP tool '{tool_name}'")
-                    return response.json()
+                    result = response.json()
+                    
+                    # Check if OAuth token exchange occurred and store the new token info
+                    if 'exchanged_token_info' in result:
+                        token_info = result['exchanged_token_info']
+                        logger.info(f"OAuth token exchange detected, updating stored credentials")
+                        
+                        # Update our stored credentials with the new access token
+                        if self.credentials:
+                            self.credentials.accessToken = token_info['access_token']
+                            self.credentials.authCode = None  # Clear the used auth code
+                            logger.info(f"Updated credentials with new access token (expires in {token_info.get('expires_in', 'unknown')} seconds)")
+                    
+                    return result
                 elif response.status_code == 401:
                     raise ValueError(f"Authentication failed for MCP server. Check your API key or Salesforce credentials.")
                 elif response.status_code == 403:

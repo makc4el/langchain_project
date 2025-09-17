@@ -158,14 +158,20 @@ def needs_salesforce_credentials(message_content: str) -> bool:
     return any(keyword in content_lower for keyword in salesforce_keywords)
 
 
-def setup_salesforce_connection(instance_url: str, access_token: Optional[str] = None, auth_code: Optional[str] = None) -> bool:
-    """Setup MCP client with Salesforce credentials"""
+def setup_salesforce_connection(instance_url: str, access_token: Optional[str] = None, auth_code: Optional[str] = None) -> tuple[bool, Optional[str]]:
+    """Setup MCP client with Salesforce credentials
+    
+    Returns:
+        tuple: (success, current_access_token) - current_access_token may be updated after OAuth exchange
+    """
     try:
         mcp_client.set_credentials(instance_url, access_token, auth_code)
-        return True
+        # Return the current access token (which may be updated after OAuth exchange)
+        current_token = mcp_client.get_current_access_token()
+        return True, current_token
     except Exception as e:
         logger.error(f"Failed to setup Salesforce connection: {e}")
-        return False
+        return False, None
 
 
 def create_llm(bind_tools: bool = False, include_salesforce: bool = False) -> ChatOpenAI:
@@ -229,8 +235,8 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
         
         updates = {}
         
-        # FIRST: If this is the very first interaction, always ask for credentials
-        if len(messages) == 1 and last_message and not salesforce_authenticated:
+        # FIRST: If this is the very first interaction and we don't have stored credentials, ask for them
+        if len(messages) == 1 and last_message and not salesforce_authenticated and not (salesforce_instance_url and salesforce_access_token):
             response = AIMessage(
                 content="🔐 Hello! I'm your Salesforce AI Assistant. Before we can begin, I need your Salesforce credentials to connect to your org.\n\n"
                        "Please provide your credentials in one of these formats:\n\n"
@@ -247,6 +253,24 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
                        "Once connected, I'll be able to help you with all your Salesforce needs!"
             )
             return {"messages": [response], **updates}
+        
+        # FIRST.5: If we have stored credentials but aren't authenticated, try to reuse them
+        if not salesforce_authenticated and salesforce_instance_url and salesforce_access_token:
+            logger.info(f"Attempting to reuse stored credentials for {salesforce_instance_url}")
+            success, current_token = setup_salesforce_connection(salesforce_instance_url, salesforce_access_token, None)
+            if success:
+                salesforce_authenticated = True
+                updates["salesforce_authenticated"] = True
+                # Update token if it changed
+                if current_token and current_token != salesforce_access_token:
+                    updates["salesforce_access_token"] = current_token
+                logger.info("Successfully reused stored credentials")
+            else:
+                logger.warning("Stored credentials failed, will ask for new ones")
+                # Clear failed credentials
+                updates["salesforce_authenticated"] = False
+                updates["salesforce_access_token"] = None
+                updates["salesforce_auth_code"] = None
         
         # SECOND: Check if user provided Salesforce credentials
         if last_message and hasattr(last_message, 'content'):
@@ -266,10 +290,23 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
                 
                 # Try to authenticate if we have instance URL and either token or code
                 if salesforce_instance_url and (salesforce_access_token or salesforce_auth_code):
-                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token, salesforce_auth_code):
+                    success, current_token = setup_salesforce_connection(salesforce_instance_url, salesforce_access_token, salesforce_auth_code)
+                    if success:
                         salesforce_authenticated = True
                         updates["salesforce_authenticated"] = True
+                        
+                        # Store the current access token (may be updated after OAuth exchange)
+                        if current_token:
+                            salesforce_access_token = current_token
+                            updates["salesforce_access_token"] = current_token
+                            # Clear auth code since we now have the access token
+                            if salesforce_auth_code:
+                                updates["salesforce_auth_code"] = None
+                        
                         auth_method = "access token" if salesforce_access_token else "authorization code"
+                        if salesforce_auth_code and current_token:
+                            auth_method = "authorization code (now exchanged for access token)"
+                        
                         response = AIMessage(
                             content=f"✅ Perfect! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
                                    f"I can now help you with:\n"
@@ -427,10 +464,23 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                 
                 # Try to authenticate if we have instance URL and either token or code
                 if salesforce_instance_url and (salesforce_access_token or salesforce_auth_code):
-                    if setup_salesforce_connection(salesforce_instance_url, salesforce_access_token, salesforce_auth_code):
+                    success, current_token = setup_salesforce_connection(salesforce_instance_url, salesforce_access_token, salesforce_auth_code)
+                    if success:
                         salesforce_authenticated = True
                         updates["salesforce_authenticated"] = True
+                        
+                        # Store the current access token (may be updated after OAuth exchange)
+                        if current_token:
+                            salesforce_access_token = current_token
+                            updates["salesforce_access_token"] = current_token
+                            # Clear auth code since we now have the access token
+                            if salesforce_auth_code:
+                                updates["salesforce_auth_code"] = None
+                        
                         auth_method = "access token" if salesforce_access_token else "authorization code"
+                        if salesforce_auth_code and current_token:
+                            auth_method = "authorization code (now exchanged for access token)"
+                        
                         response = AIMessage(
                             content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
                                    f"🚀 **Advanced Features Now Available:**\n"
