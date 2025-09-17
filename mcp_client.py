@@ -252,6 +252,30 @@ class MCPSalesforceClient:
             "records": [{"Id": record_id}]
         })
     
+    async def manage_field(self, operation: str, object_name: str, field_name: str, **kwargs) -> Dict[str, Any]:
+        """Create or update custom fields on Salesforce objects
+        
+        Args:
+            operation: 'create' or 'update'
+            object_name: API name of the Salesforce object (e.g., 'Lead', 'Account')
+            field_name: API name for the field (without __c suffix)
+            **kwargs: Additional field properties such as:
+                - type: Field type (Text, Number, Date, Picklist, etc.)
+                - label: Field label
+                - required: Whether field is required (boolean)
+                - unique: Whether field is unique (boolean)
+                - length: Field length for text fields
+                - description: Field description
+                - grantAccessTo: List of profiles to grant access to
+        """
+        arguments = {
+            "operation": operation,
+            "objectName": object_name,
+            "fieldName": field_name,
+            **kwargs
+        }
+        return await self.call_tool("salesforce_manage_field", arguments)
+    
     async def health_check(self) -> Dict[str, Any]:
         """Check if the MCP server is healthy and reachable"""
         try:
