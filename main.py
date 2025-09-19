@@ -79,13 +79,93 @@ salesforce_tools = []  # Will be loaded dynamically
 _salesforce_tools_cache = []
 
 # Initialize Salesforce tools cache for async contexts
-try:
-    from dynamic_salesforce_tools import get_all_salesforce_tools_sync
-    _salesforce_tools_cache = get_all_salesforce_tools_sync()
-    logger.info(f"🚀 Initialized {len(_salesforce_tools_cache)} Salesforce tools cache")
-except Exception as e:
-    logger.warning(f"⚠️ Failed to initialize Salesforce tools cache: {e}")
-    _salesforce_tools_cache = []
+_salesforce_tools_cache = []
+
+def initialize_salesforce_tools():
+    """Initialize Salesforce tools with robust error handling for deployment"""
+    global _salesforce_tools_cache
+    
+    if _salesforce_tools_cache:
+        return _salesforce_tools_cache  # Already initialized
+    
+    try:
+        from dynamic_salesforce_tools import get_all_salesforce_tools_sync
+        _salesforce_tools_cache = get_all_salesforce_tools_sync()
+        logger.info(f"🚀 Initialized {len(_salesforce_tools_cache)} Salesforce tools cache")
+        return _salesforce_tools_cache
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize Salesforce tools cache: {e}")
+        # In deployment, create fallback tools based on known MCP schema
+        _salesforce_tools_cache = create_fallback_salesforce_tools()
+        logger.info(f"🔧 Created {len(_salesforce_tools_cache)} fallback Salesforce tools")
+        return _salesforce_tools_cache
+
+def create_fallback_salesforce_tools():
+    """Create fallback Salesforce tools when MCP server is unreachable"""
+    from langchain_core.tools import Tool
+    
+    fallback_tools = []
+    
+    # Critical tools based on MCP server schema
+    tool_definitions = [
+        {
+            "name": "dml",
+            "description": "Create, update, or delete Salesforce records. Use operation: 'insert' for creating new records like Leads."
+        },
+        {
+            "name": "query", 
+            "description": "Query Salesforce records using SOQL. Specify objectName and fields to retrieve."
+        },
+        {
+            "name": "describe",
+            "description": "Get detailed schema information about Salesforce objects and their fields."
+        },
+        {
+            "name": "search_all",
+            "description": "Search across multiple Salesforce objects using SOSL."
+        }
+    ]
+    
+    for tool_def in tool_definitions:
+        def create_tool_func(tool_name):
+            async def fallback_tool(**kwargs):
+                from mcp_client import mcp_client
+                try:
+                    if not mcp_client.credentials:
+                        return "❌ Salesforce credentials not set. Please provide credentials first."
+                    
+                    result = await mcp_client.call_tool(tool_name, kwargs)
+                    
+                    if isinstance(result, dict) and result.get('result', {}).get('content'):
+                        content = result['result']['content']
+                        if isinstance(content, list) and content:
+                            return content[0].get('text', str(result))
+                    
+                    return str(result)
+                except Exception as e:
+                    return f"❌ Error executing {tool_name}: {str(e)}"
+            
+            def sync_fallback_tool(**kwargs):
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    return loop.run_until_complete(fallback_tool(**kwargs))
+                except RuntimeError:
+                    return asyncio.run(fallback_tool(**kwargs))
+            
+            return sync_fallback_tool
+        
+        tool = Tool(
+            name=tool_def["name"],
+            description=tool_def["description"],
+            func=create_tool_func(tool_def["name"])
+        )
+        fallback_tools.append(tool)
+    
+    return fallback_tools
+
+# Initialize tools on module load
+initialize_salesforce_tools()
 
 
 def extract_salesforce_credentials_enhanced(message_content: str) -> Optional[Dict[str, Any]]:
@@ -541,17 +621,15 @@ def create_simple_graph() -> StateGraph:
     # Add nodes
     workflow.add_node("chat", chat_node)
     
-    # CRITICAL FIX: Use the SAME tool loading logic as create_llm
-    # This ensures LLM and ToolNode have identical tools
+    # CRITICAL FIX: Robust tool loading for deployment environments  
+    # Ensures tools are available even if MCP server is unreachable during startup
     all_tools = [search_tool]
     
-    # Use the same cached tools as the LLM
-    if _salesforce_tools_cache:
-        all_tools.extend(_salesforce_tools_cache)
-        print(f"✅ ToolNode loaded {len(_salesforce_tools_cache)} cached Salesforce tools")
-        print(f"📋 ToolNode tools: {[tool.name for tool in _salesforce_tools_cache[:5]]}...")
-    else:
-        print("❌ No cached Salesforce tools - ToolNode will only have search")
+    # Initialize tools with fallback support
+    salesforce_tools = initialize_salesforce_tools()
+    all_tools.extend(salesforce_tools)
+    print(f"✅ ToolNode loaded {len(salesforce_tools)} Salesforce tools")
+    print(f"📋 ToolNode tools: {[tool.name for tool in salesforce_tools[:5]]}...")
     
     workflow.add_node("tools", ToolNode(all_tools))
     
@@ -749,15 +827,17 @@ CRITICAL TOOL USAGE RULES - FOLLOW THESE EXACTLY:
 
 SPECIFIC TOOL MAPPING:
 📊 Create Lead/Account/Contact/etc. → Use 'dml' tool with operation: 'insert'
-📋 Query Salesforce data → Use 'query' tool
+📋 Query Salesforce data → Use 'query' tool  
 🔍 Search Salesforce records → Use 'search_all' tool
 📝 Describe objects/fields → Use 'describe' tool
 🔄 Update records → Use 'dml' tool with operation: 'update'
 ❌ Delete records → Use 'dml' tool with operation: 'delete'
 
-EXAMPLE: If user asks "create new lead record", you MUST use 'dml' tool, NOT tavily_search.
+IMPORTANT: Use the exact tool names: 'dml', 'query', 'describe', 'search_all' - NOT 'salesforce_dml_records'
 
-You have direct access to the user's Salesforce org. Use Salesforce tools immediately - do NOT search the internet for how to do Salesforce operations.""")
+EXAMPLE: User asks "create new lead record" → Call 'dml' tool with operation: 'insert', objectName: 'Lead'
+
+You have direct access to the user's Salesforce org. Use Salesforce tools immediately - do NOT search the internet.""")
         
         # Insert system message at the beginning
         enhanced_messages = [salesforce_system_msg] + messages
@@ -817,17 +897,15 @@ def create_advanced_graph() -> StateGraph:
     # Add nodes
     workflow.add_node("advanced_chat", advanced_chat_node)
     
-    # CRITICAL FIX: Use the SAME tool loading logic as create_llm
-    # This ensures LLM and ToolNode have identical tools
+    # CRITICAL FIX: Robust tool loading for deployment environments
+    # Ensures tools are available even if MCP server is unreachable during startup
     all_tools = [search_tool]
     
-    # Use the same cached tools as the LLM
-    if _salesforce_tools_cache:
-        all_tools.extend(_salesforce_tools_cache)
-        print(f"✅ ToolNode loaded {len(_salesforce_tools_cache)} cached Salesforce tools")
-        print(f"📋 ToolNode tools: {[tool.name for tool in _salesforce_tools_cache[:5]]}...")
-    else:
-        print("❌ No cached Salesforce tools - ToolNode will only have search")
+    # Initialize tools with fallback support
+    salesforce_tools = initialize_salesforce_tools()
+    all_tools.extend(salesforce_tools)
+    print(f"✅ ToolNode loaded {len(salesforce_tools)} Salesforce tools")
+    print(f"📋 ToolNode tools: {[tool.name for tool in salesforce_tools[:5]]}...")
     
     workflow.add_node("tools", ToolNode(all_tools))
     
