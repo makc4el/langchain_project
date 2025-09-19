@@ -635,30 +635,64 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
             )
             return {"messages": [response], **updates}
         
-        # SECOND: Check if user provided Salesforce credentials
+        # SECOND: Check if user provided Salesforce credentials (ENHANCED)
         if last_message and hasattr(last_message, 'content'):
             credentials = extract_salesforce_credentials_enhanced(str(last_message.content))
-            instance_url = credentials.get('instanceUrl') if credentials else None
-            auth_code = credentials.get('authCode') if credentials else None
             
-            if instance_url and auth_code:
-                # Update credentials
+            if credentials and credentials.get('instanceUrl'):
+                instance_url = credentials.get('instanceUrl')
+                access_token = credentials.get('accessToken')
+                auth_code = credentials.get('authCode')
+                
                 salesforce_instance_url = instance_url
                 updates["salesforce_instance_url"] = instance_url
                 
-                # Try to authenticate using OAuth Authorization Code
-                success, current_token = setup_salesforce_connection(salesforce_instance_url, auth_code)
-                if success:
+                # Handle BOTH accessToken and authCode scenarios
+                if access_token:
+                    # Direct access token provided - use it directly
+                    from mcp_client import mcp_client
+                    mcp_client.set_credentials_from_dict(credentials)
+                    
                     salesforce_authenticated = True
+                    salesforce_access_token = access_token
                     updates["salesforce_authenticated"] = True
+                    updates["salesforce_access_token"] = access_token
                     
-                    # Store the access token obtained from OAuth exchange
-                    if current_token:
-                        salesforce_access_token = current_token
-                        updates["salesforce_access_token"] = current_token
+                    auth_method = "access token"
                     
+                elif auth_code:
+                    # OAuth authorization code provided - exchange for access token
+                    success, current_token = setup_salesforce_connection(salesforce_instance_url, auth_code)
+                    if success:
+                        salesforce_authenticated = True
+                        updates["salesforce_authenticated"] = True
+                        
+                        if current_token:
+                            salesforce_access_token = current_token
+                            updates["salesforce_access_token"] = current_token
+                        
+                        auth_method = "authorization code (exchanged for access token)"
+                    else:
+                        response = AIMessage(
+                            content="❌ Connection to Salesforce failed. Please verify your credentials:\n\n"
+                                   "• instanceUrl format: https://yourorg.my.salesforce.com\n"
+                                   "• authCode is valid and not expired\n"
+                                   "• Your Connected App is configured correctly\n"
+                                   "• The redirect_uri matches your Connected App settings\n\n"
+                                   "Please try again with a fresh authorization code."
+                        )
+                        return {"messages": [response], **updates}
+                else:
+                    # Neither access token nor auth code provided
                     response = AIMessage(
-                        content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your authorization code (now exchanged for access token).\n\n"
+                        content="❌ I need either an accessToken or authCode. Please provide complete credentials with one of these authentication methods."
+                    )
+                    return {"messages": [response], **updates}
+                
+                # Success response for both authentication methods
+                if salesforce_authenticated:
+                    response = AIMessage(
+                        content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
                                f"🚀 **Advanced Features Now Available:**\n"
                                f"• 📊 Advanced SOQL querying with analysis\n"
                                f"• 🔍 Intelligent record search and filtering\n"
@@ -669,16 +703,6 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                                f"• 🌐 Enhanced internet research capabilities\n"
                                f"• 💾 Session management and conversation history\n\n"
                                f"What advanced Salesforce operation would you like to perform?"
-                    )
-                    return {"messages": [response], **updates}
-                else:
-                    response = AIMessage(
-                        content="❌ Connection to Salesforce failed. Please verify your credentials:\n\n"
-                               "• instanceUrl format: https://yourorg.my.salesforce.com\n"
-                               "• authCode is valid and not expired\n"
-                               "• Your Connected App is configured correctly\n"
-                               "• The redirect_uri matches your Connected App settings\n\n"
-                               "Please try again with a fresh authorization code."
                     )
                     return {"messages": [response], **updates}
         
