@@ -665,8 +665,19 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         
         updates = {"conversation_count": conversation_count + 1}
         
-        # FIRST: If this is the very first interaction, always ask for credentials
-        if conversation_count == 0 and last_message and not salesforce_authenticated:
+        # FIRST: Check for credentials in messages before asking
+        # This handles cases where credentials are provided in the initial conversation
+        credentials_found = False
+        if messages:
+            for msg in messages:
+                if hasattr(msg, 'content'):
+                    check_creds = extract_salesforce_credentials_enhanced(str(msg.content))
+                    if check_creds and check_creds.get('instanceUrl'):
+                        credentials_found = True
+                        break
+        
+        # Only ask for credentials if none found and not authenticated
+        if conversation_count == 0 and last_message and not salesforce_authenticated and not credentials_found:
             response = AIMessage(
                 content="🔐 Hello! I'm your Advanced Salesforce AI Assistant with session management and enhanced capabilities.\n\n"
                        "Before we begin our conversation, I need your complete Salesforce credentials to connect to your org.\n\n"
@@ -692,12 +703,16 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         
         # SECOND: Check if user provided Salesforce credentials (ENHANCED)
         if last_message and hasattr(last_message, 'content'):
+            logger.info(f"🔍 Checking message for credentials: {str(last_message.content)[:100]}...")
             credentials = extract_salesforce_credentials_enhanced(str(last_message.content))
+            logger.info(f"🔍 Credential extraction result: {credentials is not None}")
             
             if credentials and credentials.get('instanceUrl'):
                 instance_url = credentials.get('instanceUrl')
                 access_token = credentials.get('accessToken')
                 auth_code = credentials.get('authCode')
+                
+                logger.info(f"🔍 Credentials found - instanceUrl: {instance_url}, accessToken: {bool(access_token)}, authCode: {bool(auth_code)}")
                 
                 salesforce_instance_url = instance_url
                 updates["salesforce_instance_url"] = instance_url
@@ -705,6 +720,7 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                 # Handle BOTH accessToken and authCode scenarios
                 if access_token:
                     # Direct access token provided - use it directly
+                    logger.info("🔑 Using access token authentication...")
                     from mcp_client import mcp_client
                     mcp_client.set_credentials_from_dict(credentials)
                     
@@ -714,6 +730,7 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                     updates["salesforce_access_token"] = access_token
                     
                     auth_method = "access token"
+                    logger.info("✅ Access token authentication successful!")
                     
                 elif auth_code:
                     # OAuth authorization code provided - exchange for access token
