@@ -86,91 +86,168 @@ def initialize_salesforce_tools():
     return _salesforce_tools_cache
 
 def create_mcp_salesforce_tools():
-    """Create Salesforce tools by DYNAMICALLY discovering them from MCP server"""
-    import asyncio
-    import httpx
-    from langchain_core.tools import Tool
-    from mcp_client import mcp_client
+    """DEPRECATED: Use create_structured_salesforce_tools_sync() instead
     
-    def create_dynamic_mcp_tool(tool_schema: dict):
-        """Create a LangChain tool from MCP tool schema"""
-        tool_name = tool_schema.get('name')
-        tool_description = tool_schema.get('description', f'MCP tool: {tool_name}')
-        
-        def mcp_tool_func(**kwargs):
-            async def call_mcp_async():
-                try:
-                    if not mcp_client.credentials:
-                        return "❌ Please provide Salesforce credentials first."
-                    
-                    # Call MCP server using the EXACT tool name from discovery
-                    result = await mcp_client.call_tool(tool_name, kwargs)
-                    
-                    # Extract content from MCP response
-                    if isinstance(result, dict) and 'result' in result:
-                        mcp_result = result['result']
-                        if isinstance(mcp_result, dict) and 'content' in mcp_result:
-                            content_items = []
-                            for content in mcp_result['content']:
-                                if content.get('type') == 'text':
-                                    content_items.append(content['text'])
-                            return '\n'.join(content_items) if content_items else str(mcp_result)
-                        return str(mcp_result)
-                    
-                    return str(result)
-                    
-                except Exception as e:
-                    return f"❌ Error calling {tool_name}: {str(e)}"
-            
-            try:
-                loop = asyncio.get_event_loop()
-                return loop.run_until_complete(call_mcp_async())
-            except RuntimeError:
-                return asyncio.run(call_mcp_async())
-        
-        return Tool(name=tool_name, description=tool_description, func=mcp_tool_func)
-    
-    # PROPER MCP ARCHITECTURE: Dynamically discover tools from MCP server
-    async def discover_tools_from_mcp():
-        try:
-            # Get tools directly from MCP server
-            tools_list = await mcp_client.list_tools()
-            
-            discovered_tools = []
-            for tool_schema in tools_list:
-                if isinstance(tool_schema, dict) and 'name' in tool_schema:
-                    langchain_tool = create_dynamic_mcp_tool(tool_schema)
-                    discovered_tools.append(langchain_tool)
-            
-            logger.info(f"✅ Dynamically discovered {len(discovered_tools)} tools from MCP server")
-            for tool in discovered_tools:
-                logger.info(f"   🔧 Tool: {tool.name}")
-            
-            return discovered_tools
-            
-        except Exception as e:
-            logger.warning(f"⚠️ Dynamic tool discovery failed: {e}")
-            logger.info("📋 Falling back to manual tool definitions")
-            
-            # Fallback: Define tools manually if discovery fails
-            return [
-                Tool(
-                    name="salesforce_dml_records", 
-                    description="Create, update, delete, or upsert Salesforce records",
-                    func=lambda **kwargs: "❌ MCP server connection failed"
-                )
-            ]
-    
-    # Execute discovery synchronously
-    try:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(discover_tools_from_mcp())
-    except RuntimeError:
-        return asyncio.run(discover_tools_from_mcp())
+    This function is kept for backward compatibility but redirects to StructuredTool implementation
+    """
+    logger.warning("create_mcp_salesforce_tools() is deprecated, using StructuredTool implementation")
+    return create_structured_salesforce_tools_sync()
 
 def create_fallback_salesforce_tools():
-    """Create comprehensive MCP-connected Salesforce tools"""
-    return create_mcp_salesforce_tools()
+    """Create comprehensive MCP-connected Salesforce tools using STRUCTURED TOOLS"""
+    # Use our fixed implementation with StructuredTool
+    try:
+        import asyncio
+        from fixed_dynamic_tools import get_all_salesforce_tools_properly
+        
+        # Try to get event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # In async context - create basic tools synchronously
+                logger.info("🔧 Creating StructuredTool Salesforce tools (async context)")
+                return create_structured_salesforce_tools_sync()
+            else:
+                # Not in async context - safe to run async
+                return asyncio.run(get_all_salesforce_tools_properly())
+        except RuntimeError:
+            # No event loop - safe to run async
+            logger.info("🔧 Creating StructuredTool Salesforce tools (no event loop)")
+            return asyncio.run(get_all_salesforce_tools_properly())
+            
+    except Exception as e:
+        logger.warning(f"Failed to create StructuredTools: {e}, falling back to basic tools")
+        return create_structured_salesforce_tools_sync()
+
+def create_structured_salesforce_tools_sync():
+    """Create StructuredTool Salesforce tools synchronously"""
+    from langchain_core.tools import StructuredTool
+    try:
+        from pydantic import BaseModel, Field
+    except ImportError:
+        from langchain_core.pydantic_v1 import BaseModel, Field
+    from typing import List, Dict, Any
+    from mcp_client import mcp_client
+    import asyncio
+    
+    # Define schemas for structured tools
+    class DMLInput(BaseModel):
+        operation: str = Field(description="DML operation: 'insert', 'update', or 'delete'")
+        objectName: str = Field(description="Salesforce object name (e.g., 'Lead', 'Account')")
+        records: List[Dict[str, Any]] = Field(description="List of records to process")
+    
+    class QueryInput(BaseModel):
+        query: str = Field(description="SOQL query string")
+    
+    class SearchInput(BaseModel):
+        searchTerm: str = Field(description="Search term to find across Salesforce objects")
+    
+    class DescribeInput(BaseModel):
+        objectName: str = Field(description="Salesforce object name to describe")
+    
+    def create_dml_tool():
+        def dml_function(operation: str, objectName: str, records: List[Dict[str, Any]]) -> str:
+            """Execute DML operations (insert, update, delete) on Salesforce objects"""
+            if not mcp_client.credentials:
+                return "❌ Salesforce credentials not set. Please provide credentials first."
+            
+            try:
+                arguments = {
+                    "operation": operation,
+                    "objectName": objectName, 
+                    "records": records
+                }
+                
+                # Call MCP server
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(mcp_client.call_tool("dml", arguments))
+                finally:
+                    loop.close()
+                
+                # Parse response
+                if isinstance(result, dict):
+                    if result.get('isError'):
+                        error_content = result.get('content', [])
+                        if error_content and isinstance(error_content[0], dict):
+                            error_msg = error_content[0].get('text', 'Unknown error')
+                            return f"❌ {error_msg}"
+                        return "❌ DML operation failed"
+                    
+                    # Success
+                    result_data = result.get("result", {})
+                    content = result_data.get("content", [])
+                    if content and len(content) > 0:
+                        first_item = content[0]
+                        if isinstance(first_item, dict):
+                            message = first_item.get("text", "Success")
+                            return f"✅ {message}"
+                    
+                    return f"✅ {operation} operation completed successfully"
+                
+                return str(result)
+                
+            except Exception as e:
+                return f"❌ DML Error: {str(e)}"
+        
+        return StructuredTool.from_function(
+            func=dml_function,
+            name="dml",
+            description="Execute DML operations (insert, update, delete) on Salesforce objects",
+            args_schema=DMLInput
+        )
+    
+    def create_query_tool():
+        def query_function(query: str) -> str:
+            """Execute SOQL queries on Salesforce"""
+            if not mcp_client.credentials:
+                return "❌ Salesforce credentials not set. Please provide credentials first."
+            
+            try:
+                arguments = {"query": query}
+                
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(mcp_client.call_tool("query", arguments))
+                finally:
+                    loop.close()
+                
+                # Parse response
+                if isinstance(result, dict):
+                    result_data = result.get("result", {})
+                    content = result_data.get("content", [])
+                    if content and len(content) > 0:
+                        first_item = content[0]
+                        if isinstance(first_item, dict):
+                            return first_item.get("text", "Query completed")
+                        return str(first_item)
+                    
+                    return "✅ Query executed successfully"
+                
+                return str(result)
+                
+            except Exception as e:
+                return f"❌ Query Error: {str(e)}"
+        
+        return StructuredTool.from_function(
+            func=query_function,
+            name="query",
+            description="Execute SOQL queries on Salesforce",
+            args_schema=QueryInput
+        )
+    
+    # Create the essential structured tools
+    tools = []
+    try:
+        tools.append(create_dml_tool())
+        tools.append(create_query_tool())
+        logger.info(f"✅ Created {len(tools)} StructuredTools for Salesforce")
+    except Exception as e:
+        logger.error(f"❌ Failed to create StructuredTools: {e}")
+    
+    return tools
 
 # Initialize tools on module load
 initialize_salesforce_tools()
@@ -420,20 +497,18 @@ def create_llm(bind_tools: bool = False, include_salesforce: bool = False) -> Ch
                         else:
                             logger.warning("⚠️ Salesforce tools not cached - run initialization first")
                     else:
-                        # Not in async context - safe to load
-                        from dynamic_salesforce_tools import get_all_salesforce_tools_sync
-                        dynamic_salesforce_tools = get_all_salesforce_tools_sync()
-                        tools_to_bind.extend(dynamic_salesforce_tools)
+                        # Not in async context - safe to load StructuredTools
+                        structured_salesforce_tools = create_structured_salesforce_tools_sync()
+                        tools_to_bind.extend(structured_salesforce_tools)
                         # Update global cache
-                        _salesforce_tools_cache = dynamic_salesforce_tools
-                        logger.info(f"✅ Loaded {len(dynamic_salesforce_tools)} Salesforce tools for LLM")
+                        _salesforce_tools_cache = structured_salesforce_tools
+                        logger.info(f"✅ Loaded {len(structured_salesforce_tools)} StructuredTool Salesforce tools for LLM")
                 except RuntimeError:
-                    # No event loop - safe to load
-                    from dynamic_salesforce_tools import get_all_salesforce_tools_sync
-                    dynamic_salesforce_tools = get_all_salesforce_tools_sync()
-                    tools_to_bind.extend(dynamic_salesforce_tools)
-                    _salesforce_tools_cache = dynamic_salesforce_tools
-                    logger.info(f"✅ Loaded {len(dynamic_salesforce_tools)} Salesforce tools for LLM")
+                    # No event loop - safe to load StructuredTools
+                    structured_salesforce_tools = create_structured_salesforce_tools_sync()
+                    tools_to_bind.extend(structured_salesforce_tools)
+                    _salesforce_tools_cache = structured_salesforce_tools
+                    logger.info(f"✅ Loaded {len(structured_salesforce_tools)} StructuredTool Salesforce tools for LLM")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to load Salesforce tools for LLM: {e}")
         
