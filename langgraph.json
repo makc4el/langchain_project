@@ -1,33 +1,9 @@
 {
-  "dependencies": [
-    "."
-  ],
+  "dependencies": ["."],
   "graphs": {
-    "agent": {
-      "path": "main:graph",
-      "description": "A conversational AI agent powered by OpenAI GPT-4o-mini with API support"
-    },
-    "advanced_agent": {
-      "path": "main:advanced_graph", 
-      "description": "An advanced conversational AI agent with session management and user context"
-    }
+    "agent": "./main.py:graph",
+    "advanced_agent": "./main.py:advanced_graph"
   },
-  "env": [
-    "OPENAI_API_KEY"
-  ],
-  "python_version": "3.11",
-  "pip": [
-    "langchain>=0.3.27",
-    "langchain-openai>=0.3.32", 
-    "langgraph>=0.6.7",
-    "python-dotenv>=1.1.1"
-  ],
-  "dockerfile_lines": [],
-  "metadata": {
-    "name": "langchain-project",
-    "version": "0.1.0",
-    "description": "LangGraph Platform-compatible conversational AI agent using OpenAI GPT-4o-mini with full API support",
-    "author": "Max Odarchenko",
-    "tags": ["langchain", "langgraph", "openai", "conversational-ai", "gpt-4o-mini", "platform-ready", "api"]
-  }
+  "env": ".env",
+  "dockerfile": "Dockerfile"
 }
