@@ -215,8 +215,8 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Custom - Sensitive test files with real credentials
-# NEVER COMMIT THESE FILES - THEY CONTAIN REAL SALESFORCE CREDENTIALS
+# Custom - Sensitive test files (now with placeholders but still excluded for safety)
+# These files contain credential placeholders and should not be committed
 *test_with_credentials*
 *_test_credentials*
 run_test_with_credentials.py
@@ -226,6 +226,15 @@ verify_lead.py
 test_mcp_integration.py
 test_complete_flow.py
 test_tool_priority.py
+complete_flow_test.py
+working_ai_mcp_demo.py
+test_ai_agent_with_mcp.py
+test_mcp_integration_live.py
+test_direct_tool_call.py
+final_working_test.py
+test_lead_creation.py
+demo_ai_agent_mcp_flow.py
+debug_advanced_agent.py
 
 # Sensitive data patterns - generic patterns to avoid secret detection
 *real_credentials*

@@ -85,65 +85,92 @@ def initialize_salesforce_tools():
     logger.info(f"✅ Initialized {len(_salesforce_tools_cache)} essential Salesforce tools")
     return _salesforce_tools_cache
 
-def create_fallback_salesforce_tools():
-    """Create simple, working Salesforce tools for deployment"""
+def create_mcp_salesforce_tools():
+    """Create Salesforce tools by DYNAMICALLY discovering them from MCP server"""
+    import asyncio
+    import httpx
     from langchain_core.tools import Tool
+    from mcp_client import mcp_client
     
-    # Simple Lead creation tool - the exact one needed
-    def create_lead_tool(**kwargs):
-        """Simple Lead creation tool using MCP"""
-        import asyncio
-        from mcp_client import mcp_client
+    def create_dynamic_mcp_tool(tool_schema: dict):
+        """Create a LangChain tool from MCP tool schema"""
+        tool_name = tool_schema.get('name')
+        tool_description = tool_schema.get('description', f'MCP tool: {tool_name}')
         
-        async def create_lead_async():
+        def mcp_tool_func(**kwargs):
+            async def call_mcp_async():
+                try:
+                    if not mcp_client.credentials:
+                        return "❌ Please provide Salesforce credentials first."
+                    
+                    # Call MCP server using the EXACT tool name from discovery
+                    result = await mcp_client.call_tool(tool_name, kwargs)
+                    
+                    # Extract content from MCP response
+                    if isinstance(result, dict) and 'result' in result:
+                        mcp_result = result['result']
+                        if isinstance(mcp_result, dict) and 'content' in mcp_result:
+                            content_items = []
+                            for content in mcp_result['content']:
+                                if content.get('type') == 'text':
+                                    content_items.append(content['text'])
+                            return '\n'.join(content_items) if content_items else str(mcp_result)
+                        return str(mcp_result)
+                    
+                    return str(result)
+                    
+                except Exception as e:
+                    return f"❌ Error calling {tool_name}: {str(e)}"
+            
             try:
-                if not mcp_client.credentials:
-                    return "❌ Please provide Salesforce credentials first."
-                
-                # Extract Lead data from kwargs
-                lead_data = kwargs.get('records', [{}])[0] if kwargs.get('records') else {}
-                if not lead_data:
-                    # Create default Lead data
-                    import random
-                    suffix = random.randint(1000, 9999)
-                    lead_data = {
-                        "FirstName": "Test",
-                        "LastName": f"Lead{suffix}",
-                        "Company": f"Test Company {suffix}",
-                        "Email": f"test{suffix}@example.com",
-                        "Status": "Open - Not Contacted"
-                    }
-                
-                # Call MCP server with correct tool name
-                result = await mcp_client.call_tool("dml", {
-                    "instanceUrl": mcp_client.credentials.instanceUrl,
-                    "accessToken": mcp_client.credentials.accessToken,
-                    "operation": "insert",
-                    "objectName": "Lead",
-                    "records": [lead_data]
-                })
-                
-                if isinstance(result, dict) and result.get('result'):
-                    return f"✅ Lead created successfully! Result: {result['result']}"
-                
-                return f"✅ Lead creation completed: {result}"
-                
-            except Exception as e:
-                return f"❌ Error creating Lead: {str(e)}"
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(call_mcp_async())
+            except RuntimeError:
+                return asyncio.run(call_mcp_async())
         
-        try:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(create_lead_async())
-        except RuntimeError:
-            return asyncio.run(create_lead_async())
+        return Tool(name=tool_name, description=tool_description, func=mcp_tool_func)
     
-    return [
-        Tool(
-            name="dml",
-            description="Create, update, or delete Salesforce records. Use operation='insert' for creating new records like Leads.",
-            func=create_lead_tool
-        )
-    ]
+    # PROPER MCP ARCHITECTURE: Dynamically discover tools from MCP server
+    async def discover_tools_from_mcp():
+        try:
+            # Get tools directly from MCP server
+            tools_list = await mcp_client.list_tools()
+            
+            discovered_tools = []
+            for tool_schema in tools_list:
+                if isinstance(tool_schema, dict) and 'name' in tool_schema:
+                    langchain_tool = create_dynamic_mcp_tool(tool_schema)
+                    discovered_tools.append(langchain_tool)
+            
+            logger.info(f"✅ Dynamically discovered {len(discovered_tools)} tools from MCP server")
+            for tool in discovered_tools:
+                logger.info(f"   🔧 Tool: {tool.name}")
+            
+            return discovered_tools
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Dynamic tool discovery failed: {e}")
+            logger.info("📋 Falling back to manual tool definitions")
+            
+            # Fallback: Define tools manually if discovery fails
+            return [
+                Tool(
+                    name="salesforce_dml_records", 
+                    description="Create, update, delete, or upsert Salesforce records",
+                    func=lambda **kwargs: "❌ MCP server connection failed"
+                )
+            ]
+    
+    # Execute discovery synchronously
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(discover_tools_from_mcp())
+    except RuntimeError:
+        return asyncio.run(discover_tools_from_mcp())
+
+def create_fallback_salesforce_tools():
+    """Create comprehensive MCP-connected Salesforce tools"""
+    return create_mcp_salesforce_tools()
 
 # Initialize tools on module load
 initialize_salesforce_tools()
@@ -519,19 +546,44 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
                         salesforce_access_token = current_token
                         updates["salesforce_access_token"] = current_token
                     
-                    response = AIMessage(
-                        content=f"✅ Perfect! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your authorization code (now exchanged for access token).\n\n"
-                               f"I can now help you with:\n"
-                               f"• 📊 Querying data with SOQL\n"
-                               f"• 🔍 Searching for records\n"
-                               f"• 📋 Describing objects and fields\n"
-                               f"• ➕ Creating new records\n"
-                               f"• 🔄 Updating existing records\n"
-                               f"• ❌ Deleting records\n"
-                               f"• 🌐 Internet search when needed\n\n"
-                               f"What would you like to do with Salesforce?"
-                    )
-                    return {"messages": [response], **updates}
+                    # Check if user has additional requests beyond just credentials
+                    user_message = str(last_message.content).lower()
+                    operation_keywords = [
+                        'show me', 'query', 'find', 'search', 'create', 'lead', 'account', 
+                        'contact', 'opportunity', 'record', 'data', 'list', 'display',
+                        'get', 'retrieve', 'any random', 'help me with', 'i want to see',
+                        'please', 'can you', 'soql', 'task', 'steps', 'operation'
+                    ]
+                    
+                    has_operation_request = any(keyword in user_message for keyword in operation_keywords)
+                    
+                    if has_operation_request:
+                        # User provided both credentials AND a request - continue processing
+                        logger.info(f"🎯 Simple agent: Authentication successful, continuing to process user request...")
+                        
+                        # Add auth success message but continue processing
+                        auth_success_msg = AIMessage(
+                            content=f"✅ Connected to your Salesforce org at {salesforce_instance_url}! Now processing your request..."
+                        )
+                        updates["messages"] = [auth_success_msg]
+                        
+                        # Continue to FOURTH section to process the actual request
+                        
+                    else:
+                        # User ONLY provided credentials - ask what they want
+                        response = AIMessage(
+                            content=f"✅ Perfect! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your authorization code (now exchanged for access token).\n\n"
+                                   f"I can now help you with:\n"
+                                   f"• 📊 Querying data with SOQL\n"
+                                   f"• 🔍 Searching for records\n"
+                                   f"• 📋 Describing objects and fields\n"
+                                   f"• ➕ Creating new records\n"
+                                   f"• 🔄 Updating existing records\n"
+                                   f"• ❌ Deleting records\n"
+                                   f"• 🌐 Internet search when needed\n\n"
+                                   f"What would you like to do with Salesforce?"
+                        )
+                        return {"messages": [response], **updates}
                 else:
                     response = AIMessage(
                         content="❌ I couldn't connect to Salesforce with those credentials. Please verify:\n\n"
@@ -761,22 +813,49 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                     )
                     return {"messages": [response], **updates}
                 
-                # Success response for both authentication methods
+                # SUCCESS: Authentication completed - now check if user has additional requests
                 if salesforce_authenticated:
-                    response = AIMessage(
-                        content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
-                               f"🚀 **Advanced Features Now Available:**\n"
-                               f"• 📊 Advanced SOQL querying with analysis\n"
-                               f"• 🔍 Intelligent record search and filtering\n"
-                               f"• 📋 Comprehensive object and field exploration\n"
-                               f"• ➕ Smart record creation with validation\n"
-                               f"• 🔄 Bulk data operations and updates\n"
-                               f"• ❌ Safe record deletion with confirmations\n"
-                               f"• 🌐 Enhanced internet research capabilities\n"
-                               f"• 💾 Session management and conversation history\n\n"
-                               f"What advanced Salesforce operation would you like to perform?"
-                    )
-                    return {"messages": [response], **updates}
+                    # Check if the message contains requests beyond just credentials
+                    user_message = str(last_message.content).lower()
+                    
+                    # Look for Salesforce operation keywords
+                    operation_keywords = [
+                        'show me', 'query', 'find', 'search', 'create', 'lead', 'account', 
+                        'contact', 'opportunity', 'record', 'data', 'list', 'display',
+                        'get', 'retrieve', 'any random', 'help me with', 'i want to see',
+                        'please', 'can you', 'soql', 'task', 'steps', 'operation'
+                    ]
+                    
+                    has_operation_request = any(keyword in user_message for keyword in operation_keywords)
+                    
+                    if has_operation_request:
+                        # User provided both credentials AND a request - continue processing
+                        logger.info(f"🎯 Authentication successful, continuing to process user request...")
+                        
+                        # Add authentication success message to history but don't return yet
+                        auth_success_msg = AIMessage(
+                            content=f"✅ Successfully authenticated with your Salesforce org at {salesforce_instance_url}! Now processing your request..."
+                        )
+                        updates["messages"] = [auth_success_msg]
+                        
+                        # Continue to FOURTH section to process the actual request
+                        
+                    else:
+                        # User ONLY provided credentials without any request - ask what they want
+                        response = AIMessage(
+                            content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
+                                   f"🚀 **Advanced Features Now Available:**\n"
+                                   f"• 📊 Advanced SOQL querying with analysis\n"
+                                   f"• 🔍 Intelligent record search and filtering\n"
+                                   f"• 📋 Comprehensive object and field exploration\n"
+                                   f"• ➕ Smart record creation with validation\n"
+                                   f"• 🔄 Bulk data operations and updates\n"
+                                   f"• ❌ Safe record deletion with confirmations\n"
+                                   f"• 🌐 Enhanced internet research capabilities\n"
+                                   f"• 💾 Session management and conversation history\n\n"
+                                   f"What advanced Salesforce operation would you like to perform?"
+                        )
+                        return {"messages": [response], **updates}
         
         # THIRD: Block all conversation if not authenticated
         if not salesforce_authenticated:
