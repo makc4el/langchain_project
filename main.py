@@ -814,10 +814,10 @@ AVAILABLE SALESFORCE TOOL MAPPING:
 🔄 Update records → Use 'dml' tool with operation: 'update'
 ❌ Delete records → Use 'dml' tool with operation: 'delete'
 
-TOOL NAME PRIORITY: 
-- Try 'dml' first for record operations
-- If 'dml' doesn't work, try 'salesforce_dml_records'
-- Use exact tool names that are available in your tool list
+CRITICAL: Use ONLY the tool name 'dml' for record operations
+- Tool name is 'dml' (NOT 'salesforce_dml_records')
+- This is the only Salesforce tool available
+- Search tools are disabled
 
 EXAMPLE: User asks "create new lead record" → Call 'dml' tool with:
 {
