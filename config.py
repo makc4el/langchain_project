@@ -46,10 +46,10 @@ class Config:
     # Application settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
-    # MCP Server Configuration
+    # MCP Server Configuration - Updated to new production server
     MCP_SALESFORCE_SERVER_URL: str = os.getenv(
         "MCP_SALESFORCE_SERVER_URL", 
-        "https://your-mcp-server.railway.app"
+        "https://mcp-server-salesforce-production.up.railway.app"
     )
     
     # Optional Salesforce OAuth Configuration (for auth code flow in MCP server)

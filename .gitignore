@@ -243,3 +243,26 @@ test*.py
 *real_credentials*
 *actual_tokens*
 *production_secrets*
+
+# LangGraph deployment URLs and sensitive test data
+*deployment_url*
+*deployment_test*
+*langsmith*
+
+# Environment files (keep all variations secure)
+.env
+.env.*
+!.env.example
+
+# Sensitive configuration files
+*secrets*
+*credentials*
+*.pem
+*.key
+*.cert
+
+# API keys and tokens (additional protection - but allow examples)
+*api_key*.py
+*access_token*.py
+*refresh_token*.py
+*auth_code*.py

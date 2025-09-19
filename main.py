@@ -648,15 +648,22 @@ def chat_node(state: ChatState, config: RunnableConfig) -> Dict[str, Any]:
                         # User ONLY provided credentials - ask what they want
                         response = AIMessage(
                             content=f"✅ Perfect! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your authorization code (now exchanged for access token).\n\n"
-                                   f"I can now help you with:\n"
-                                   f"• 📊 Querying data with SOQL\n"
-                                   f"• 🔍 Searching for records\n"
-                                   f"• 📋 Describing objects and fields\n"
-                                   f"• ➕ Creating new records\n"
-                                   f"• 🔄 Updating existing records\n"
-                                   f"• ❌ Deleting records\n"
-                                   f"• 🌐 Internet search when needed\n\n"
-                                   f"What would you like to do with Salesforce?"
+                                   f"🚀 **COMPREHENSIVE SALESFORCE CAPABILITIES NOW AVAILABLE:**\n\n"
+                                   f"📊 **DATA OPERATIONS:**\n"
+                                   f"• Query records with SOQL and aggregate queries\n"
+                                   f"• Create, update, delete, and upsert records\n"
+                                   f"• Cross-object search and object discovery\n"
+                                   f"• Detailed object and field descriptions\n\n"
+                                   f"🏗️ **OBJECT & FIELD MANAGEMENT:**\n"
+                                   f"• Create and modify custom objects\n"
+                                   f"• Add and update custom fields\n"
+                                   f"• Manage field-level security permissions\n\n"
+                                   f"⚙️ **APEX CODE DEVELOPMENT:**\n"
+                                   f"• Read and write Apex classes\n"
+                                   f"• Create and manage Apex triggers\n"
+                                   f"• Execute anonymous Apex code\n"
+                                   f"• Manage debug logs for users\n\n"
+                                   f"What would you like to do with your Salesforce org?"
                         )
                         return {"messages": [response], **updates}
                 else:
@@ -919,15 +926,27 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
                         # User ONLY provided credentials without any request - ask what they want
                         response = AIMessage(
                             content=f"✅ Excellent! I've successfully connected to your Salesforce org at {salesforce_instance_url} using your {auth_method}.\n\n"
-                                   f"🚀 **Advanced Features Now Available:**\n"
-                                   f"• 📊 Advanced SOQL querying with analysis\n"
-                                   f"• 🔍 Intelligent record search and filtering\n"
-                                   f"• 📋 Comprehensive object and field exploration\n"
-                                   f"• ➕ Smart record creation with validation\n"
-                                   f"• 🔄 Bulk data operations and updates\n"
-                                   f"• ❌ Safe record deletion with confirmations\n"
-                                   f"• 🌐 Enhanced internet research capabilities\n"
-                                   f"• 💾 Session management and conversation history\n\n"
+                                   f"🚀 **COMPREHENSIVE ADVANCED SALESFORCE CAPABILITIES:**\n\n"
+                                   f"📊 **ENTERPRISE DATA OPERATIONS:**\n"
+                                   f"• Advanced SOQL queries with relationship support\n"
+                                   f"• Aggregate queries with GROUP BY analytics\n"
+                                   f"• Cross-object SOSL search capabilities\n"
+                                   f"• Smart record creation, updates, and deletion\n"
+                                   f"• Object discovery and detailed schema analysis\n\n"
+                                   f"🏗️ **SALESFORCE ADMINISTRATION:**\n"
+                                   f"• Custom object creation and modification\n"
+                                   f"• Custom field management with all field types\n"
+                                   f"• Field-level security and permissions\n"
+                                   f"• Metadata management operations\n\n"
+                                   f"⚙️ **APEX DEVELOPMENT PLATFORM:**\n"
+                                   f"• Full Apex class development lifecycle\n"
+                                   f"• Apex trigger creation and management\n"
+                                   f"• Anonymous Apex code execution\n"
+                                   f"• Debug log management for troubleshooting\n\n"
+                                   f"💾 **SESSION MANAGEMENT:**\n"
+                                   f"• Conversation history tracking\n"
+                                   f"• Multi-operation workflows\n"
+                                   f"• Context-aware assistance\n\n"
                                    f"What advanced Salesforce operation would you like to perform?"
                         )
                         return {"messages": [response], **updates}
@@ -971,33 +990,43 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         
         # Add system message to prioritize Salesforce tools
         from langchain_core.messages import SystemMessage
-        salesforce_system_msg = SystemMessage(content="""You are now connected to Salesforce with full access to Salesforce tools.
+        salesforce_system_msg = SystemMessage(content="""You are now connected to Salesforce with COMPREHENSIVE access to Salesforce MCP tools.
 
-CRITICAL TOOL USAGE RULES - SALESFORCE TOOLS ONLY:
-✅ You ONLY have access to Salesforce MCP tools - use them for ALL Salesforce tasks
-⚠️ Search/internet tools are DISABLED to prevent confusion
+🚀 ENHANCED SALESFORCE CAPABILITIES - NEW BUILD:
+✅ Full suite of Salesforce MCP tools available
+⚠️ Internet search tools are DISABLED to prevent confusion
 
-AVAILABLE SALESFORCE TOOL MAPPING:
-📊 Create Lead/Account/Contact/etc. → Use 'dml' tool with operation: 'insert'
-📋 Query Salesforce data → Use 'query' tool  
-🔍 Search Salesforce records → Use 'search_all' tool
-📝 Describe objects/fields → Use 'describe' tool
-🔄 Update records → Use 'dml' tool with operation: 'update'
-❌ Delete records → Use 'dml' tool with operation: 'delete'
+📊 COMPREHENSIVE TOOL MAPPING:
 
-CRITICAL: Use ONLY the tool name 'dml' for record operations
-- Tool name is 'dml' (NOT 'salesforce_dml_records')
-- This is the only Salesforce tool available
-- Search tools are disabled
+DATA OPERATIONS:
+• Query records → Use 'salesforce_query_records'
+• Aggregate queries → Use 'salesforce_aggregate_query' 
+• Create/Update/Delete records → Use 'salesforce_dml_records'
+• Cross-object search → Use 'salesforce_search_all'
+• Find objects by pattern → Use 'salesforce_search_objects'
+• Describe objects/fields → Use 'salesforce_describe_object'
 
-EXAMPLE: User asks "create new lead record" → Call 'dml' tool with:
-{
-  "operation": "insert",
-  "objectName": "Lead", 
-  "records": [{"FirstName": "...", "LastName": "...", "Company": "..."}]
-}
+OBJECT & FIELD MANAGEMENT:
+• Create/modify custom objects → Use 'salesforce_manage_object'
+• Add/update custom fields → Use 'salesforce_manage_field'
+• Manage field permissions → Use 'salesforce_manage_field_permissions'
 
-You have direct access to Salesforce. Create records immediately using the appropriate Salesforce tool.""")
+APEX CODE DEVELOPMENT:
+• Read Apex classes → Use 'salesforce_read_apex'
+• Create/update Apex classes → Use 'salesforce_write_apex'
+• Read Apex triggers → Use 'salesforce_read_apex_trigger'
+• Create/update triggers → Use 'salesforce_write_apex_trigger'
+• Execute anonymous Apex → Use 'salesforce_execute_anonymous'
+• Manage debug logs → Use 'salesforce_manage_debug_logs'
+
+TOOL USAGE EXAMPLES:
+✨ "Create a Lead" → salesforce_dml_records(operation="insert", objectName="Lead", records=[...])
+✨ "Query Accounts" → salesforce_query_records(query="SELECT Id, Name FROM Account LIMIT 10")
+✨ "Search for Smith" → salesforce_search_all(searchTerm="Smith")
+✨ "Describe Contact" → salesforce_describe_object(objectName="Contact")
+✨ "Create Apex class" → salesforce_write_apex(className="MyClass", body="public class MyClass {...}")
+
+You have direct access to a comprehensive Salesforce MCP server. Use the appropriate tool for each task.""")
         
         # Insert system message at the beginning
         enhanced_messages = [salesforce_system_msg] + messages

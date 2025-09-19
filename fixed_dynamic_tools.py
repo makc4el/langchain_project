@@ -16,10 +16,14 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from mcp_client import mcp_client
 
 
-# Pydantic schemas for structured tools
+# ==========================================
+# PYDANTIC SCHEMAS FOR ALL SALESFORCE TOOLS
+# ==========================================
+
+# Basic Operations
 class DMLInput(BaseModel):
-    """Input schema for DML operations (insert, update, delete)"""
-    operation: str = Field(description="DML operation: 'insert', 'update', or 'delete'")
+    """Input schema for DML operations (insert, update, delete, upsert)"""
+    operation: str = Field(description="DML operation: 'insert', 'update', 'delete', or 'upsert'")
     objectName: str = Field(description="Salesforce object name (e.g., 'Lead', 'Account', 'Contact')")
     records: List[Dict[str, Any]] = Field(description="List of records to process")
 
@@ -27,25 +31,88 @@ class QueryInput(BaseModel):
     """Input schema for SOQL queries"""
     query: str = Field(description="SOQL query string")
 
-class SearchInput(BaseModel):
-    """Input schema for Salesforce search"""
+class AggregateQueryInput(BaseModel):
+    """Input schema for aggregate SOQL queries with GROUP BY"""
+    query: str = Field(description="Aggregate SOQL query string with GROUP BY, COUNT, SUM, etc.")
+
+class SearchObjectsInput(BaseModel):
+    """Input schema for searching Salesforce objects by pattern"""
+    pattern: str = Field(description="Pattern to search for in object names")
+
+class SearchAllInput(BaseModel):
+    """Input schema for cross-object SOSL search"""
     searchTerm: str = Field(description="Search term to find across Salesforce objects")
+    returning: Optional[str] = Field(None, description="RETURNING clause for SOSL")
+    limit: Optional[int] = Field(None, description="Limit number of results")
 
 class DescribeInput(BaseModel):
     """Input schema for describe operations"""
     objectName: str = Field(description="Salesforce object name to describe")
+
+# Object and Field Management
+class ObjectManagementInput(BaseModel):
+    """Input schema for object management operations"""
+    operation: str = Field(description="Operation: 'create' or 'update'")
+    objectName: str = Field(description="Custom object name (without __c suffix)")
+    label: Optional[str] = Field(None, description="Object label")
+    pluralLabel: Optional[str] = Field(None, description="Plural label")
+    description: Optional[str] = Field(None, description="Object description")
 
 class FieldManagementInput(BaseModel):
     """Input schema for field management operations"""
     operation: str = Field(description="Operation: 'create' or 'update'")
     objectName: str = Field(description="Salesforce object name")
     fieldName: str = Field(description="Field name (without __c suffix)")
-    type: Optional[str] = Field(None, description="Field type (Text, Number, Date, etc.)")
+    type: Optional[str] = Field(None, description="Field type (Text, Number, Date, Picklist, etc.)")
     label: Optional[str] = Field(None, description="Field label")
     required: Optional[bool] = Field(None, description="Whether field is required")
     unique: Optional[bool] = Field(None, description="Whether field is unique")
     length: Optional[int] = Field(None, description="Field length for text fields")
+    precision: Optional[int] = Field(None, description="Precision for number fields")
+    scale: Optional[int] = Field(None, description="Scale for number fields")
     description: Optional[str] = Field(None, description="Field description")
+    picklistValues: Optional[List[str]] = Field(None, description="Values for picklist fields")
+
+class FieldPermissionsInput(BaseModel):
+    """Input schema for field permissions management"""
+    objectName: str = Field(description="Salesforce object name")
+    fieldName: str = Field(description="Field name")
+    profileName: str = Field(description="Profile name to grant access to")
+    readable: Optional[bool] = Field(None, description="Whether field is readable")
+    editable: Optional[bool] = Field(None, description="Whether field is editable")
+
+# Apex Code Management
+class ReadApexInput(BaseModel):
+    """Input schema for reading Apex classes"""
+    className: str = Field(description="Apex class name to read")
+
+class WriteApexInput(BaseModel):
+    """Input schema for writing Apex classes"""
+    className: str = Field(description="Apex class name")
+    body: str = Field(description="Apex class body/code")
+    status: Optional[str] = Field("Active", description="Class status (Active/Inactive)")
+
+class ReadApexTriggerInput(BaseModel):
+    """Input schema for reading Apex triggers"""
+    triggerName: str = Field(description="Apex trigger name to read")
+
+class WriteApexTriggerInput(BaseModel):
+    """Input schema for writing Apex triggers"""
+    triggerName: str = Field(description="Apex trigger name")
+    body: str = Field(description="Apex trigger body/code")
+    objectName: str = Field(description="sObject the trigger is for")
+    status: Optional[str] = Field("Active", description="Trigger status (Active/Inactive)")
+
+class ExecuteAnonymousInput(BaseModel):
+    """Input schema for executing anonymous Apex"""
+    apexCode: str = Field(description="Apex code to execute anonymously")
+
+class DebugLogsInput(BaseModel):
+    """Input schema for debug log management"""
+    operation: str = Field(description="Operation: 'enable', 'disable', or 'list'")
+    userEmail: str = Field(description="Email of user to manage debug logs for")
+    logLevel: Optional[str] = Field("DEBUG", description="Debug log level")
+    duration: Optional[int] = Field(30, description="Duration in minutes")
 
 
 class ProperDynamicToolManager:
@@ -87,19 +154,44 @@ class ProperDynamicToolManager:
             return []
     
     def _get_input_schema(self, tool_name: str):
-        """Get the appropriate input schema for a tool"""
+        """Get the appropriate input schema for a tool based on the new MCP server tools"""
         tool_schemas = {
+            # Basic Operations
             'dml': DMLInput,
-            'salesforce_dml_records': DMLInput,  # Legacy name support
+            'salesforce_dml_records': DMLInput,
             'query': QueryInput,
-            'salesforce_query': QueryInput,
-            'search': SearchInput,
-            'search_all': SearchInput,
-            'salesforce_search': SearchInput,
+            'salesforce_query_records': QueryInput,
+            'salesforce_aggregate_query': AggregateQueryInput,
+            
+            # Search Operations
+            'search': SearchAllInput,
+            'search_all': SearchAllInput,
+            'salesforce_search_all': SearchAllInput,
+            'salesforce_search_objects': SearchObjectsInput,
+            
+            # Describe Operations
             'describe': DescribeInput,
-            'salesforce_describe': DescribeInput,
+            'salesforce_describe_object': DescribeInput,
+            
+            # Object & Field Management
+            'salesforce_manage_object': ObjectManagementInput,
             'salesforce_manage_field': FieldManagementInput,
-            'manage_field': FieldManagementInput
+            'salesforce_manage_field_permissions': FieldPermissionsInput,
+            
+            # Apex Code Management
+            'salesforce_read_apex': ReadApexInput,
+            'salesforce_write_apex': WriteApexInput,
+            'salesforce_read_apex_trigger': ReadApexTriggerInput,
+            'salesforce_write_apex_trigger': WriteApexTriggerInput,
+            'salesforce_execute_anonymous': ExecuteAnonymousInput,
+            'salesforce_manage_debug_logs': DebugLogsInput,
+            
+            # Legacy name support
+            'manage_field': FieldManagementInput,
+            'manage_object': ObjectManagementInput,
+            'read_apex': ReadApexInput,
+            'write_apex': WriteApexInput,
+            'execute_anonymous': ExecuteAnonymousInput
         }
         return tool_schemas.get(tool_name)
 

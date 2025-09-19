@@ -304,22 +304,45 @@ class MCPSalesforceClient:
             "records": [{"Id": record_id}]
         })
     
+    # ==========================================
+    # ENHANCED SALESFORCE MCP TOOLS (NEW BUILD)
+    # ==========================================
+    
+    async def search_objects(self, pattern: str) -> Dict[str, Any]:
+        """Find Salesforce objects by name pattern"""
+        return await self.call_tool("salesforce_search_objects", {"pattern": pattern})
+    
+    async def describe_object_detailed(self, object_name: str) -> Dict[str, Any]:
+        """Get detailed schema information for any object"""
+        return await self.call_tool("salesforce_describe_object", {"objectName": object_name})
+    
+    async def query_records(self, query: str) -> Dict[str, Any]:
+        """Query records with relationship support"""
+        return await self.call_tool("salesforce_query_records", {"query": query})
+    
+    async def aggregate_query(self, query: str) -> Dict[str, Any]:
+        """Execute aggregate queries with GROUP BY"""
+        return await self.call_tool("salesforce_aggregate_query", {"query": query})
+    
+    async def dml_records(self, operation: str, object_name: str, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Insert, update, delete, or upsert records"""
+        return await self.call_tool("salesforce_dml_records", {
+            "operation": operation,
+            "objectName": object_name,
+            "records": records
+        })
+    
+    async def manage_object(self, operation: str, object_name: str, **kwargs) -> Dict[str, Any]:
+        """Create or modify custom objects"""
+        arguments = {
+            "operation": operation,
+            "objectName": object_name,
+            **kwargs
+        }
+        return await self.call_tool("salesforce_manage_object", arguments)
+    
     async def manage_field(self, operation: str, object_name: str, field_name: str, **kwargs) -> Dict[str, Any]:
-        """Create or update custom fields on Salesforce objects
-        
-        Args:
-            operation: 'create' or 'update'
-            object_name: API name of the Salesforce object (e.g., 'Lead', 'Account')
-            field_name: API name for the field (without __c suffix)
-            **kwargs: Additional field properties such as:
-                - type: Field type (Text, Number, Date, Picklist, etc.)
-                - label: Field label
-                - required: Whether field is required (boolean)
-                - unique: Whether field is unique (boolean)
-                - length: Field length for text fields
-                - description: Field description
-                - grantAccessTo: List of profiles to grant access to
-        """
+        """Add or update custom fields"""
         arguments = {
             "operation": operation,
             "objectName": object_name,
@@ -327,6 +350,72 @@ class MCPSalesforceClient:
             **kwargs
         }
         return await self.call_tool("salesforce_manage_field", arguments)
+    
+    async def manage_field_permissions(self, object_name: str, field_name: str, profile_name: str, **kwargs) -> Dict[str, Any]:
+        """Manage field-level security"""
+        arguments = {
+            "objectName": object_name,
+            "fieldName": field_name,
+            "profileName": profile_name,
+            **kwargs
+        }
+        return await self.call_tool("salesforce_manage_field_permissions", arguments)
+    
+    async def search_all(self, search_term: str, **kwargs) -> Dict[str, Any]:
+        """Cross-object SOSL search"""
+        arguments = {
+            "searchTerm": search_term,
+            **kwargs
+        }
+        return await self.call_tool("salesforce_search_all", arguments)
+    
+    # ==========================================
+    # APEX CODE MANAGEMENT TOOLS
+    # ==========================================
+    
+    async def read_apex(self, class_name: str) -> Dict[str, Any]:
+        """Read Apex classes and metadata"""
+        return await self.call_tool("salesforce_read_apex", {"className": class_name})
+    
+    async def write_apex(self, class_name: str, body: str, **kwargs) -> Dict[str, Any]:
+        """Create or update Apex classes"""
+        arguments = {
+            "className": class_name,
+            "body": body,
+            **kwargs
+        }
+        return await self.call_tool("salesforce_write_apex", arguments)
+    
+    async def read_apex_trigger(self, trigger_name: str) -> Dict[str, Any]:
+        """Read Apex triggers"""
+        return await self.call_tool("salesforce_read_apex_trigger", {"triggerName": trigger_name})
+    
+    async def write_apex_trigger(self, trigger_name: str, body: str, object_name: str, **kwargs) -> Dict[str, Any]:
+        """Create or update Apex triggers"""
+        arguments = {
+            "triggerName": trigger_name,
+            "body": body,
+            "objectName": object_name,
+            **kwargs
+        }
+        return await self.call_tool("salesforce_write_apex_trigger", arguments)
+    
+    async def execute_anonymous(self, apex_code: str) -> Dict[str, Any]:
+        """Execute anonymous Apex code"""
+        return await self.call_tool("salesforce_execute_anonymous", {"apexCode": apex_code})
+    
+    async def manage_debug_logs(self, operation: str, user_email: str, **kwargs) -> Dict[str, Any]:
+        """Manage debug logs for users"""
+        arguments = {
+            "operation": operation,
+            "userEmail": user_email,
+            **kwargs
+        }
+        return await self.call_tool("salesforce_manage_debug_logs", arguments)
+    
+    # ==========================================
+    # LEGACY TOOL COMPATIBILITY (OLD NAMES)
+    # ==========================================
     
     async def health_check(self) -> Dict[str, Any]:
         """Check if the MCP server is healthy and reachable"""
