@@ -541,21 +541,17 @@ def create_simple_graph() -> StateGraph:
     # Add nodes
     workflow.add_node("chat", chat_node)
     
-    # Get Salesforce tools dynamically (CORRECT architecture)
-    try:
-        from dynamic_salesforce_tools import get_all_salesforce_tools_sync
-        dynamic_salesforce_tools = get_all_salesforce_tools_sync()
-        all_tools = [search_tool] + dynamic_salesforce_tools
-        print(f"✅ Loaded {len(dynamic_salesforce_tools)} tools from MCP server dynamically")
-    except Exception as e:
-        print(f"⚠️ Dynamic tool loading failed: {e}")
-        # Use cached tools as fallback instead of just search
-        if _salesforce_tools_cache:
-            all_tools = [search_tool] + _salesforce_tools_cache
-            print(f"✅ Using cached {len(_salesforce_tools_cache)} Salesforce tools as fallback")
-        else:
-            print("❌ No cached Salesforce tools available - falling back to search only")
-            all_tools = [search_tool]  # Last resort fallback
+    # CRITICAL FIX: Use the SAME tool loading logic as create_llm
+    # This ensures LLM and ToolNode have identical tools
+    all_tools = [search_tool]
+    
+    # Use the same cached tools as the LLM
+    if _salesforce_tools_cache:
+        all_tools.extend(_salesforce_tools_cache)
+        print(f"✅ ToolNode loaded {len(_salesforce_tools_cache)} cached Salesforce tools")
+        print(f"📋 ToolNode tools: {[tool.name for tool in _salesforce_tools_cache[:5]]}...")
+    else:
+        print("❌ No cached Salesforce tools - ToolNode will only have search")
     
     workflow.add_node("tools", ToolNode(all_tools))
     
@@ -821,21 +817,17 @@ def create_advanced_graph() -> StateGraph:
     # Add nodes
     workflow.add_node("advanced_chat", advanced_chat_node)
     
-    # Get Salesforce tools dynamically (CORRECT architecture)
-    try:
-        from dynamic_salesforce_tools import get_all_salesforce_tools_sync
-        dynamic_salesforce_tools = get_all_salesforce_tools_sync()
-        all_tools = [search_tool] + dynamic_salesforce_tools
-        print(f"✅ Loaded {len(dynamic_salesforce_tools)} tools from MCP server dynamically")
-    except Exception as e:
-        print(f"⚠️ Dynamic tool loading failed: {e}")
-        # Use cached tools as fallback instead of just search
-        if _salesforce_tools_cache:
-            all_tools = [search_tool] + _salesforce_tools_cache
-            print(f"✅ Using cached {len(_salesforce_tools_cache)} Salesforce tools as fallback")
-        else:
-            print("❌ No cached Salesforce tools available - falling back to search only")
-            all_tools = [search_tool]  # Last resort fallback
+    # CRITICAL FIX: Use the SAME tool loading logic as create_llm
+    # This ensures LLM and ToolNode have identical tools
+    all_tools = [search_tool]
+    
+    # Use the same cached tools as the LLM
+    if _salesforce_tools_cache:
+        all_tools.extend(_salesforce_tools_cache)
+        print(f"✅ ToolNode loaded {len(_salesforce_tools_cache)} cached Salesforce tools")
+        print(f"📋 ToolNode tools: {[tool.name for tool in _salesforce_tools_cache[:5]]}...")
+    else:
+        print("❌ No cached Salesforce tools - ToolNode will only have search")
     
     workflow.add_node("tools", ToolNode(all_tools))
     
