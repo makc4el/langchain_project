@@ -549,7 +549,13 @@ def create_simple_graph() -> StateGraph:
         print(f"✅ Loaded {len(dynamic_salesforce_tools)} tools from MCP server dynamically")
     except Exception as e:
         print(f"⚠️ Dynamic tool loading failed: {e}")
-        all_tools = [search_tool]  # Fallback to just search
+        # Use cached tools as fallback instead of just search
+        if _salesforce_tools_cache:
+            all_tools = [search_tool] + _salesforce_tools_cache
+            print(f"✅ Using cached {len(_salesforce_tools_cache)} Salesforce tools as fallback")
+        else:
+            print("❌ No cached Salesforce tools available - falling back to search only")
+            all_tools = [search_tool]  # Last resort fallback
     
     workflow.add_node("tools", ToolNode(all_tools))
     
@@ -699,6 +705,15 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         logger.info(f"✅ User authenticated - enabling Salesforce tools for advanced chat")
         llm = create_llm(bind_tools=True, include_salesforce=True)
         
+        # Debug: Log what tools are actually bound to the LLM
+        if hasattr(llm, 'bound') and hasattr(llm.bound, 'tools'):
+            tool_names = [tool.name for tool in llm.bound.tools]
+            logger.info(f"🔧 LLM has access to tools: {tool_names}")
+            salesforce_tool_count = len([name for name in tool_names if name != 'tavily_search'])
+            logger.info(f"📊 Salesforce tools available: {salesforce_tool_count}, Tavily: {'yes' if 'tavily_search' in tool_names else 'no'}")
+        else:
+            logger.warning("⚠️ Could not determine what tools are bound to LLM")
+        
         # Log the current message for debugging
         if messages:
             last_user_msg = next((msg.content for msg in reversed(messages) if hasattr(msg, 'content') and msg.__class__.__name__ == 'HumanMessage'), "No user message found")
@@ -708,14 +723,21 @@ def advanced_chat_node(state: AdvancedChatState, config: RunnableConfig) -> Dict
         from langchain_core.messages import SystemMessage
         salesforce_system_msg = SystemMessage(content="""You are now connected to Salesforce with full access to Salesforce tools.
 
-IMPORTANT TOOL USAGE GUIDELINES:
-🔧 For ANY Salesforce operations (creating records, querying data, updating records, etc.), ALWAYS use the Salesforce MCP tools (dml, query, describe, etc.)
-🔍 Only use tavily_search for general internet research that is NOT related to Salesforce operations
-📊 For creating Leads, Accounts, Contacts, or any Salesforce records, use the 'dml' tool with operation: 'insert'
-📋 For querying Salesforce data, use the 'query' tool
-⚙️  Available Salesforce tools: dml, query, describe, search_all, and others - prefer these for all Salesforce tasks
+CRITICAL TOOL USAGE RULES - FOLLOW THESE EXACTLY:
+🚫 NEVER use tavily_search for Salesforce operations (creating, updating, querying Salesforce data)
+✅ ALWAYS use Salesforce MCP tools for ANY Salesforce task
 
-You have full access to the user's authenticated Salesforce org. Use Salesforce tools first for any Salesforce-related requests.""")
+SPECIFIC TOOL MAPPING:
+📊 Create Lead/Account/Contact/etc. → Use 'dml' tool with operation: 'insert'
+📋 Query Salesforce data → Use 'query' tool
+🔍 Search Salesforce records → Use 'search_all' tool
+📝 Describe objects/fields → Use 'describe' tool
+🔄 Update records → Use 'dml' tool with operation: 'update'
+❌ Delete records → Use 'dml' tool with operation: 'delete'
+
+EXAMPLE: If user asks "create new lead record", you MUST use 'dml' tool, NOT tavily_search.
+
+You have direct access to the user's Salesforce org. Use Salesforce tools immediately - do NOT search the internet for how to do Salesforce operations.""")
         
         # Insert system message at the beginning
         enhanced_messages = [salesforce_system_msg] + messages
@@ -783,7 +805,13 @@ def create_advanced_graph() -> StateGraph:
         print(f"✅ Loaded {len(dynamic_salesforce_tools)} tools from MCP server dynamically")
     except Exception as e:
         print(f"⚠️ Dynamic tool loading failed: {e}")
-        all_tools = [search_tool]  # Fallback to just search
+        # Use cached tools as fallback instead of just search
+        if _salesforce_tools_cache:
+            all_tools = [search_tool] + _salesforce_tools_cache
+            print(f"✅ Using cached {len(_salesforce_tools_cache)} Salesforce tools as fallback")
+        else:
+            print("❌ No cached Salesforce tools available - falling back to search only")
+            all_tools = [search_tool]  # Last resort fallback
     
     workflow.add_node("tools", ToolNode(all_tools))
     
