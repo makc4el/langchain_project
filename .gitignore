@@ -235,6 +235,9 @@ final_working_test.py
 test_lead_creation.py
 demo_ai_agent_mcp_flow.py
 debug_advanced_agent.py
+*test*.py
+test*.py
+*test.py
 
 # Sensitive data patterns - generic patterns to avoid secret detection
 *real_credentials*
